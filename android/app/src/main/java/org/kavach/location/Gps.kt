@@ -12,7 +12,7 @@ import kotlin.coroutines.resume
 
 /** A GNSS fix with its age. The UI must never show an old fix as live (dossier T-02). */
 data class Fix(val lat: Double, val lon: Double, val accuracyM: Double, val timeMs: Long) {
-    val ageS: Long get() = (System.currentTimeMillis() - timeMs) / 1000
+    val ageS: Long get() = ((System.currentTimeMillis() - timeMs) / 1000).coerceAtLeast(0)
 }
 
 object Gps {

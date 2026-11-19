@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -23,6 +24,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -106,6 +108,7 @@ fun RealMap(
     statuses: Map<String, StatusView>,
     selected: String?,
     onSelect: (String?) -> Unit,
+    highlightedEdges: Set<String> = emptySet(),
 ) {
     val p = remember(graph) {
         val lats = graph.nodes.values.map { it.lat }
@@ -113,11 +116,44 @@ fun RealMap(
         Projection(lats.min(), lats.max(), lons.min(), lons.max())
     }
     val geo = remember(graph, features) { buildGeometry(graph, features, p) }
+    val routePath = remember(graph, highlightedEdges) {
+        Path().apply {
+            highlightedEdges.forEach { id ->
+                val edge = graph.edges[id] ?: return@forEach
+                val a = graph.nodes[edge.u] ?: return@forEach
+                val b = graph.nodes[edge.v] ?: return@forEach
+                val start = p.at(a.lat, a.lon)
+                val end = p.at(b.lat, b.lon)
+                moveTo(start.x, start.y)
+                lineTo(end.x, end.y)
+            }
+        }
+    }
     val measurer = rememberTextMeasurer()
     var size by remember { mutableStateOf(IntSize.Zero) }
     var scale by remember { mutableStateOf(0f) }        // px per projected unit; 0 = not fitted yet
     var offset by remember { mutableStateOf(Offset.Zero) }
     val density = LocalDensity.current
+
+    LaunchedEffect(graph, highlightedEdges, size) {
+        if (highlightedEdges.isEmpty() || size.width == 0 || size.height == 0) return@LaunchedEffect
+        val points = highlightedEdges.mapNotNull { id ->
+            val edge = graph.edges[id] ?: return@mapNotNull null
+            val a = graph.nodes[edge.u] ?: return@mapNotNull null
+            val b = graph.nodes[edge.v] ?: return@mapNotNull null
+            p.at(a.lat, a.lon) to p.at(b.lat, b.lon)
+        }.flatMap { listOf(it.first, it.second) }
+        if (points.isEmpty()) return@LaunchedEffect
+        val minX = points.minOf { it.x }; val maxX = points.maxOf { it.x }
+        val minY = points.minOf { it.y }; val maxY = points.maxOf { it.y }
+        val routeW = (maxX - minX).coerceAtLeast(1f)
+        val routeH = (maxY - minY).coerceAtLeast(1f)
+        val focusScale = (minOf(size.width / routeW, size.height / routeH) * 0.72f)
+            .coerceIn(size.width / W * 0.5f, 200f)
+        val center = Offset((minX + maxX) / 2f, (minY + maxY) / 2f)
+        scale = focusScale
+        offset = Offset(size.width / 2f - center.x * focusScale, size.height / 2f - center.y * focusScale)
+    }
 
     Box(
         Modifier.fillMaxWidth().height(420.dp)
@@ -152,30 +188,39 @@ fun RealMap(
         }
         Canvas(Modifier.fillMaxWidth().height(420.dp)) {
             if (scale == 0f) return@Canvas
-            withTransform({
-                translate(offset.x, offset.y)
-                scale(scale, scale, pivot = Offset.Zero)
-            }) {
-                val lw = 1f / scale
-                // Water first, under roads.
-                for ((kind, path) in geo.water) {
-                    drawPath(path, waterColor(kind), style = Stroke(width = (if (kind == "river") 3f else 1.5f) * lw, cap = StrokeCap.Round))
+            clipRect {
+                withTransform({
+                    translate(offset.x, offset.y)
+                    scale(scale, scale, pivot = Offset.Zero)
+                }) {
+                    val lw = 1f / scale
+                    // Water first, under roads.
+                    for ((kind, path) in geo.water) {
+                        drawPath(path, waterColor(kind), style = Stroke(width = (if (kind == "river") 3f else 1.5f) * lw, cap = StrokeCap.Round))
+                    }
+                    drawPath(geo.roads, Color(0xFF8A929C), style = Stroke(width = lw))
+                    for ((cid, path) in geo.crossings) {
+                        val st = statuses[cid]?.status ?: Status.UNKNOWN
+                        val w = (if (cid == selected) 7f else 4f) * lw
+                        drawPath(path, statusColor(st), style = Stroke(width = w, cap = StrokeCap.Round))
+                    }
+                    for ((pt, _) in geo.settlements) {
+                        drawCircle(Color.White, 4f * lw, pt)
+                        drawCircle(Color(0xFF14171C), 4f * lw, pt, style = Stroke(width = 1.5f * lw))
+                    }
+                    for ((pt, _) in geo.facilities) {
+                        drawRect(Color(0xFF14171C), pt - Offset(5f * lw, 5f * lw), Size(10f * lw, 10f * lw))
+                    }
+                    // Draw last so crossings, settlements, and facilities cannot hide a candidate route.
+                    if (highlightedEdges.isNotEmpty()) {
+                        drawPath(routePath, Color.White,
+                            style = Stroke(width = 22f * lw, cap = StrokeCap.Round))
+                        drawPath(routePath, Color(0xFF00695C),
+                            style = Stroke(width = 14f * lw, cap = StrokeCap.Round))
+                    }
                 }
-                drawPath(geo.roads, Color(0xFF8A929C), style = Stroke(width = lw))
-                for ((cid, path) in geo.crossings) {
-                    val st = statuses[cid]?.status ?: Status.UNKNOWN
-                    val w = (if (cid == selected) 7f else 4f) * lw
-                    drawPath(path, statusColor(st), style = Stroke(width = w, cap = StrokeCap.Round))
-                }
-                for ((pt, _) in geo.settlements) {
-                    drawCircle(Color.White, 4f * lw, pt)
-                    drawCircle(Color(0xFF14171C), 4f * lw, pt, style = Stroke(width = 1.5f * lw))
-                }
-                for ((pt, _) in geo.facilities) {
-                    drawRect(Color(0xFF14171C), pt - Offset(5f * lw, 5f * lw), Size(10f * lw, 10f * lw))
-                }
+                if (scale > 6f && highlightedEdges.isEmpty()) drawLabels(geo, measurer, scale, offset)
             }
-            if (scale > 6f) drawLabels(geo, measurer, scale, offset)
         }
         Text(
             "© OpenStreetMap contributors · ODbL",

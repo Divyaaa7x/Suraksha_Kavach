@@ -4,3 +4,7 @@ https://www.openstreetmap.org/copyright  — keep this attribution with any map 
 Extract: Overpass API, bbox 17.95,78.05 to 18.45,78.55 (Medak / Kamareddy area), retrieved 2026-11-19.
 Crossing tags (bridge=*, culvert=*, ford=*) are mapping data, not inspection results.
 Nothing in this pack was produced by a field inspection. Every crossing starts as UNKNOWN.
+
+India overview boundaries: Natural Earth Admin 1 States and Provinces (1:10m), filtered to India,
+source https://www.naturalearthdata.com/downloads/10m-cultural-vectors/10m-admin-1-states-provinces/.
+Natural Earth data is public domain. These reference boundaries are not authoritative legal limits.

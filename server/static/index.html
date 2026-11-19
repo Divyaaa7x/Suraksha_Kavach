@@ -21,10 +21,12 @@
   .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px; }
   h2 { font-size:15px; margin:0 0 8px; }
   #mapwrap { position:relative; }
+  canvas#india { width:100%; height:320px; display:block; background:#eef1ee; border-radius:8px; }
   canvas#map { width:100%; height:560px; display:block; background:#eef1ee; border-radius:8px; cursor:grab; touch-action:none; }
   .attrib { position:absolute; right:8px; bottom:6px; font-size:11px; background:rgba(255,255,255,.85); color:#222; padding:2px 6px; border-radius:4px; }
   .legend span { display:inline-block; margin:2px 8px 2px 0; font-size:12px; }
   .dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:4px; vertical-align:middle; }
+  .route-key { display:inline-block; width:20px; height:5px; margin:0 4px 2px 0; background:#00695c; outline:2px solid #fff; vertical-align:middle; }
   label { display:block; font-size:13px; color:var(--muted); margin-top:8px; }
   select, input, button { font:inherit; padding:8px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--fg); width:100%; }
   button { background:var(--fg); color:var(--bg); cursor:pointer; margin-top:10px; font-weight:600; }
@@ -34,6 +36,9 @@
   pre { white-space:pre-wrap; word-break:break-word; font-size:12px; background:var(--bg); padding:8px; border-radius:8px; max-height:260px; overflow:auto; }
   .muted { color:var(--muted); font-size:13px; }
   .detail { font-size:13px; margin-top:8px; min-height:2em; }
+  .review-row { border-top:1px solid var(--line); padding:10px 0; }
+  .review-actions { display:flex; gap:8px; flex-wrap:wrap; }
+  .review-actions button { width:auto; margin-top:6px; }
 </style>
 </head>
 <body>
@@ -41,9 +46,15 @@
   <h1>SURAKSHA KAVACH · Command Hub <span class="muted" id="hstat">connecting…</span></h1>
 </header>
 <div class="banner">Decision support only. A human approves every access decision. Map data: OpenStreetMap (ODbL). Crossing status is UNKNOWN until a report or approval says otherwise. Works with the internet off.</div>
+<section class="card" style="margin:12px 12px 0">
+  <h2>India overview · state and union territory reference boundaries</h2>
+  <canvas id="india" aria-label="Offline reference map of Indian states and union territories"></canvas>
+  <label>Selected state or union territory <select id="indiaState"></select></label>
+  <p class="muted">Reference boundaries only; no nationwide detailed road routing. Detailed OSM roads are available for Medak / Kamareddy, Telangana.</p>
+</section>
 <main>
   <section class="card">
-    <h2>Real road network · Medak / Kamareddy</h2>
+    <h2>Detailed road network · Medak / Kamareddy, Telangana</h2>
     <div id="mapwrap">
       <canvas id="map" aria-label="Road network with crossing status; drag to pan, wheel to zoom"></canvas>
       <div class="attrib">© OpenStreetMap contributors · ODbL</div>
@@ -79,6 +90,13 @@
     </div>
   </section>
 </main>
+<section class="card" style="margin:0 12px 12px">
+  <h2>Coordinator · field report review</h2>
+  <p class="muted">Reports are claims. Review evidence and policy, then record a separate human decision. The optional approval control uses a public synthetic demo key; it is not authentication and is unsuitable for real operations.</p>
+  <label>Decision rationale <input id="approvalReason" maxlength="512" placeholder="Required: record the basis for this demo decision"></label>
+  <div id="reviewStatus" class="muted" role="status" aria-live="polite"></div>
+  <div id="reports">Loading field reports…</div>
+</section>
 <script>
 const COLORS = { UNKNOWN:'#6b4fbb', REPORTED_OPEN:'#a15c00', REPORTED_CLOSED:'#a15c00', VERIFIED_OPEN:'#1b7f3b',
   VERIFIED_CLOSED:'#b3261e', RESTRICTED:'#a15c00', DISPUTED:'#8a2be2', STALE:'#5b6470', PREDICTED_RISK:'#0b6e99' };
@@ -87,8 +105,9 @@ const ROAD_W = { motorway:3, trunk:3, primary:2.5, secondary:2, tertiary:1.6, un
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-let G = null, F = null, ST = {}, view = {x:0, y:0, k:1}, bounds, roadPath = null, crossEdges = [], selected = null;
+let G = null, F = null, INDIA = null, selectedState = 'IN-TG', ST = {}, view = {x:0, y:0, k:1}, bounds, roadPath = null, crossEdges = [], selected = null, routeEdges = new Set();
 const canvas = $('map'), ctx = canvas.getContext('2d');
+const indiaCanvas = $('india'), indiaCtx = indiaCanvas.getContext('2d');
 
 async function j(url, opts) {
   const r = await fetch(url, opts);
@@ -108,6 +127,21 @@ function fit() {
   const [x0,y0] = toXY(bounds.maxLa, bounds.minLo), [x1,y1] = toXY(bounds.minLa, bounds.maxLo);
   const k = Math.min(w / (x1 - x0), h / (y1 - y0)) * 0.95;
   view = { k, x: w/2 - ((x0+x1)/2) * k, y: h/2 - ((y0+y1)/2) * k };
+}
+
+function focusRoute(edgeIds) {
+  const wanted = new Set(edgeIds), points = [];
+  for (const e of G.edges) if (wanted.has(e.edge_id)) points.push(G.nodeXY[e.u], G.nodeXY[e.v]);
+  const valid = points.filter(Boolean);
+  if (!valid.length) return 0;
+  const xs = valid.map(p => p[0]), ys = valid.map(p => p[1]);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const rw = Math.max(x1 - x0, 0.001), rh = Math.max(y1 - y0, 0.001);
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  view.k = Math.min(w / rw, h / rh) * 0.72;
+  view.x = w / 2 - ((x0 + x1) / 2) * view.k;
+  view.y = h / 2 - ((y0 + y1) / 2) * view.k;
+  return valid.length / 2;
 }
 
 function screen([x,y]) { return [x * view.k + view.x, y * view.k + view.y]; }
@@ -169,9 +203,21 @@ function draw() {
       ctx.fillStyle = '#fff'; ctx.fill(); ctx.lineWidth = 1.5/view.k; ctx.strokeStyle = '#14171c'; ctx.stroke();
     }
   }
+  if (routeEdges.size) {
+    ctx.beginPath();
+    for (const e of G.edges) {
+      if (!routeEdges.has(e.edge_id)) continue;
+      const a = G.nodeXY[e.u], b = G.nodeXY[e.v];
+      if (!a || !b) continue;
+      ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]);
+    }
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 9 / view.k; ctx.stroke();
+    ctx.strokeStyle = '#00695c'; ctx.lineWidth = 5 / view.k; ctx.stroke();
+  }
   ctx.restore();
   // Labels for settlements and facilities at a useful zoom.
-  if (view.k > 900) {
+  if (view.k > 900 && !routeEdges.size) {
     ctx.font = '11px system-ui'; ctx.fillStyle = '#14171c';
     for (const n of G.nodes) {
       if (n.kind === 'junction' || !n.name) continue;
@@ -179,6 +225,33 @@ function draw() {
       ctx.fillText(n.name, sx + 6, sy - 6);
     }
   }
+}
+
+function drawIndia() {
+  if (!INDIA) return;
+  const w = indiaCanvas.clientWidth, h = indiaCanvas.clientHeight;
+  indiaCanvas.width = w * devicePixelRatio; indiaCanvas.height = h * devicePixelRatio;
+  indiaCtx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+  indiaCtx.clearRect(0, 0, w, h);
+  const project = ([lon, lat]) => [((lon - 67) / 32) * w, h - ((lat - 5) / 34) * h];
+  for (const area of INDIA.features) for (const ring of area.rings || []) {
+    if (ring.length < 3) continue;
+    indiaCtx.beginPath();
+    ring.forEach((coord, i) => { const [x, y] = project(coord); i ? indiaCtx.lineTo(x, y) : indiaCtx.moveTo(x, y); });
+    indiaCtx.closePath();
+    indiaCtx.fillStyle = area.code === selectedState ? '#a9d7c5' : '#dfe7e3';
+    indiaCtx.strokeStyle = area.code === selectedState ? '#00796b' : '#79877f';
+    indiaCtx.lineWidth = area.code === selectedState ? 2 : 0.8;
+    indiaCtx.fill(); indiaCtx.stroke();
+  }
+}
+
+function setIndiaOverview(data) {
+  INDIA = data;
+  $('indiaState').innerHTML = data.features.map(a => `<option value="${esc(a.code)}">${esc(a.name)}</option>`).join('');
+  $('indiaState').value = selectedState;
+  $('indiaState').addEventListener('change', () => { selectedState = $('indiaState').value; drawIndia(); });
+  drawIndia();
 }
 
 function nearestCrossing(px, py) {
@@ -247,12 +320,69 @@ async function refreshPanels(scenario) {
     || '<tr><td colspan="3">No unverified crossings.</td></tr>';
 }
 
+async function refreshReview() {
+  const [reports, approvals] = await Promise.all([
+    j('/v1/events?kind=OBSERVATION'), j('/v1/events?kind=APPROVAL')
+  ]);
+  const latest = new Map();
+  for (const a of approvals) {
+    const prev = latest.get(a.asset_id);
+    if (!prev || a.received_at > prev.received_at) latest.set(a.asset_id, a);
+  }
+  if (!reports.length) {
+    $('reports').textContent = 'No field reports received yet.';
+    return;
+  }
+  $('reports').innerHTML = reports.slice().reverse().map(e => {
+    const s = ST[e.asset_id] || {status:'UNKNOWN'};
+    const pos = e.position || {};
+    const decision = latest.get(e.asset_id);
+    const decisionText = decision ? `Latest coordinator decision: ${esc(decision.approved_status)} · ${esc(decision.rationale)}` : 'No coordinator decision recorded.';
+    const note = e.note ? `<br>Note: ${esc(e.note)}` : '';
+    const location = Number.isFinite(pos.lat) && Number.isFinite(pos.lon)
+      ? `<br>Reported location: ${Number(pos.lat).toFixed(5)}, ${Number(pos.lon).toFixed(5)} ±${esc(pos.accuracy_m ?? '?')} m` : '';
+    return `<article class="review-row"><b>${esc(e.asset_id)}</b> · ${esc(e.observation_type)} · <span class="badge" style="color:${COLORS[s.status] || COLORS.UNKNOWN}">${esc(s.status)}</span>`+
+      `<div class="muted">Observed ${esc(e.observed_at)} · received ${esc(e.received_at || 'unknown')} · ${esc(e.origin_key_id)} · ${esc(e.source_class)}</div>`+
+      `<div>${decisionText}${note}${location}</div>`+
+      `<div class="review-actions">`+
+      `<button data-asset="${esc(e.asset_id)}" data-status="VERIFIED_OPEN">Record verified open</button>`+
+      `<button data-asset="${esc(e.asset_id)}" data-status="VERIFIED_CLOSED">Record verified closed</button>`+
+      `<button data-asset="${esc(e.asset_id)}" data-status="RESTRICTED">Record restricted access</button>`+
+      `</div></article>`;
+  }).join('');
+  document.querySelectorAll('.review-actions button').forEach(button => {
+    button.disabled = !window.DEMO_APPROVALS_ENABLED;
+    button.addEventListener('click', () => recordDemoApproval(button.dataset.asset, button.dataset.status));
+  });
+  $('reviewStatus').textContent = window.DEMO_APPROVALS_ENABLED
+    ? 'Synthetic demo supervisor controls enabled. Decisions are visibly marked SIMULATED.'
+    : 'Review-only mode. Set KAVACH_DEMO_MODE=1 to enable synthetic supervisor controls.';
+}
+
+async function recordDemoApproval(assetId, approvedStatus) {
+  const rationale = $('approvalReason').value.trim();
+  if (!rationale) { $('reviewStatus').textContent = 'Enter a rationale before recording a decision.'; return; }
+  try {
+    const result = await j('/v1/demo/approvals', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({asset_id:assetId, approved_status:approvedStatus, rationale})
+    });
+    $('reviewStatus').textContent = result.status === 'accepted'
+      ? `SIMULATED decision recorded for ${assetId}. It is an append-only event; review conflicts before operational use.`
+      : `Decision not recorded: ${result.reason || result.status}`;
+    await refreshStatus($('scenario').value.trim());
+    draw(); await refreshPanels($('scenario').value.trim()); await refreshReview();
+  } catch (err) { $('reviewStatus').textContent = `Decision not recorded: ${err.message}`; }
+}
+
 async function init() {
   try {
     const h = await j('/v1/health');
     $('hstat').textContent = `pack ${h.pack_version} · offline · graph ${h.graph_version}`;
+    window.DEMO_APPROVALS_ENABLED = Boolean(h.demo_approvals_enabled);
     $('gver').textContent = `Pack created ${h.pack_created_at}. ${h.source_class_note}`;
     G = await j('/v1/assets');
+    setIndiaOverview(await j('/v1/india-overview'));
     const names = G.nodes.filter(n => n.kind !== 'junction' && n.name);
     const opts = names.map(n => `<option value="${esc(n.node_id)}">${esc(n.name)}</option>`).join('');
     $('origin').innerHTML = opts; $('dest').innerHTML = opts;
@@ -264,10 +394,11 @@ async function init() {
     for (const n of G.nodes) G.nodeXY[n.node_id] = toXY(n.lat, n.lon);
     try { F = await j('/v1/features'); } catch (e) { F = {features: []}; }
     buildRoadPaths();
-    $('legend').innerHTML = Object.keys(COLORS).map(k => `<span><i class="dot" style="background:${COLORS[k]}"></i>${k}</span>`).join('');
+    $('legend').innerHTML = Object.keys(COLORS).map(k => `<span><i class="dot" style="background:${COLORS[k]}"></i>${k}</span>`).join('')+
+      '<span><i class="route-key"></i>candidate route</span>';
     fit();
-    await refreshStatus(''); draw(); await refreshPanels('');
-    window.addEventListener('resize', () => { fit(); draw(); });
+    await refreshStatus(''); draw(); await refreshPanels(''); await refreshReview();
+    window.addEventListener('resize', () => { fit(); draw(); drawIndia(); });
   } catch (err) {
     $('hstat').textContent = 'hub unreachable: ' + err.message;
   }
@@ -275,11 +406,30 @@ async function init() {
 
 $('go').onclick = async () => {
   const scenario = $('scenario').value.trim();
-  const body = { origin: $('origin').value, destination: $('dest').value, vehicle: $('vehicle').value,
-                 policy: $('policy').value, scenario_at_risk: scenario ? scenario.split(',').map(s => s.trim()) : [] };
-  const r = await j('/v1/routes/compute', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
-  $('routeOut').textContent = JSON.stringify(r, null, 2);
-  await refreshStatus(scenario); draw(); await refreshPanels(scenario);
+  $('go').disabled = true;
+  $('routeOut').textContent = 'Computing route…';
+  try {
+    const body = { origin: $('origin').value, destination: $('dest').value, vehicle: $('vehicle').value,
+                   policy: $('policy').value, scenario_at_risk: scenario ? scenario.split(',').map(s => s.trim()) : [] };
+    const r = await j('/v1/routes/compute', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    routeEdges = r.result === 'ROUTE_CANDIDATE' ? new Set(r.edges || []) : new Set();
+    const matched = routeEdges.size ? focusRoute([...routeEdges]) : 0;
+    const time = Number.isFinite(r.travel_time_s) ? `Class-speed estimate: ${Math.round(r.travel_time_s / 60)} min (not measured).` : 'No travel-time estimate.';
+    const caveat = r.caveat || 'A route candidate is not a safety determination; human review is required.';
+    $('routeOut').textContent = [
+      `Result: ${r.result || 'ERROR'}`,
+      `Candidate segments highlighted: ${matched} of ${(r.edges || []).length}.`,
+      `Policy: ${r.policy || body.policy} · vehicle: ${r.vehicle || body.vehicle}.`,
+      `Unverified segments excluded: ${(r.excluded_edges || []).length}.`,
+      time,
+      caveat,
+      r.error || ''
+    ].filter(Boolean).join('\n');
+    await refreshStatus(scenario); draw(); await refreshPanels(scenario);
+  } catch (err) {
+    routeEdges = new Set(); fit(); draw();
+    $('routeOut').textContent = `Route request failed: ${err.message}`;
+  } finally { $('go').disabled = false; }
 };
 
 init();

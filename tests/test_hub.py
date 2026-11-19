@@ -2,6 +2,7 @@
 import json
 import shutil
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -47,6 +48,37 @@ def test_health_is_offline_and_labelled(client):
     assert h["pack_version"] == PV
     assert h["source_class"] == "SIMULATED"
     assert "no field verification" in h["source_class_note"]
+
+
+def test_india_overview_api_has_reference_boundaries(client):
+    data = client.get("/v1/india-overview").json()
+    assert data["license"].startswith("Public domain")
+    assert len(data["features"]) == 36
+    assert any(area["code"] == "IN-TG" for area in data["features"])
+
+
+def test_synthetic_coordinator_approval_is_disabled_by_default(client):
+    response = client.post("/v1/demo/approvals", json={
+        "asset_id": "C1", "approved_status": "VERIFIED_OPEN", "rationale": "demo review"
+    })
+    assert response.status_code == 403
+    assert response.json()["status"] == "disabled"
+
+
+def test_synthetic_coordinator_approval_requires_nonblank_rationale(tmp_path):
+    client = TestClient(create_app(PACK, tmp_path / "demo.sqlite3", demo_approvals_enabled=True))
+    response = client.post("/v1/demo/approvals", json={
+        "asset_id": "C1", "approved_status": "VERIFIED_OPEN", "rationale": "   "
+    })
+    assert response.status_code == 422
+    assert response.json()["status"] == "rejected"
+
+
+def test_parallel_dashboard_event_reads_share_sqlite_safely(client):
+    hub = client.app.state.hub
+    with ThreadPoolExecutor(max_workers=12) as pool:
+        results = list(pool.map(lambda _: hub.events("OBSERVATION"), range(100)))
+    assert results == [[]] * 100
 
 
 def test_valid_observation_accepted_and_duplicate_idempotent(client):

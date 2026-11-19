@@ -135,7 +135,8 @@ class Hub:
     # ------------------------------------------------------------ views
     def events(self, kind: str | None = None) -> list[dict]:
         q = "SELECT * FROM events" + (" WHERE kind=?" if kind else "") + " ORDER BY received_at, event_id"
-        rows = self.db.execute(q, (kind,) if kind else ()).fetchall()
+        with self._lock:
+            rows = self.db.execute(q, (kind,) if kind else ()).fetchall()
         out = []
         for r in rows:
             d = json.loads(r["body_json"])

@@ -1,15 +1,20 @@
 # Verification report
 
-Updated 19 November 2026. This report contains observed results only; unrun hardware and platform checks stay pending.
+Updated 20 November 2026. This report contains observed results only; unrun hardware and platform checks stay pending.
 
 ## Automated checks
 
 | Check | Result | Evidence |
 |---|---|---|
-| Python unit/integration suite | PASS | `python -m pytest -q`: 35 tests passed on Windows/Python 3.14.7. |
+| Python unit/integration suite | PASS | `python -m pytest -q`: 42 tests passed on Windows/Python 3.14.7, including India overview, demo-approval guard, and parallel dashboard SQLite read cases. |
 | Android build | PASS | Gradle 8.11.1, JDK 21, Android SDK platform 34: `testDebugUnitTest assembleDebug` succeeded. |
-| Android Kotlin unit tests | PASS | 19 tests across graph, JSON/crypto, and offline pack verification; zero failures. |
-| Install and launch on Pixel 8a | PASS | Debug APK installed through ADB; `org.kavach/.MainActivity` remained resumed on Android 17. |
+| Android Kotlin unit tests | PASS | 22 tests across graph, JSON/crypto, pack verification, LAN URL validation, and Nearby payload batching; zero failures. |
+| Install and launch on Pixel 8a | PASS | Debug APK installed through ADB; `org.kavach/.MainActivity` launched on Android 17. |
+| India overview and local-detail switch | PASS | Pixel renders 36 Natural Earth state/UT reference boundaries, highlights Telangana, and opens the bounded Medak/Kamareddy OSM detail map. |
+| Route candidate and route-focused map | PASS | Pixel produced `ROUTE_CANDIDATE` (95 nodes/94 segments); “Show route on map” focuses the map around the teal outlined candidate path. |
+| Permission timing and Nearby start | PARTIAL PASS | Location and Nearby permissions are requested only from their actions. Nearby starts on Pixel; a second physical device was unavailable for pairing and transfer verification. |
+| Coordinator dashboard | PASS | Local FastAPI dashboard loaded in browser with India overview, Telangana selected, local road map, and coordinator review panel. |
+| Synthetic coordinator API guards | PASS | Default-disabled demo approval and nonblank rationale are covered by API tests. |
 | Synthetic graph golden cases | PASS | `tests/test_graph.py`, including closed-edge exclusion and no-route behavior. |
 | Hub event, signature, conflict, replay and payload checks | PASS | `tests/test_hub.py`. |
 | OSM pack verification and provenance rules | PASS | `tests/test_real_pack.py`; crossings start unknown. |
@@ -20,15 +25,15 @@ Updated 19 November 2026. This report contains observed results only; unrun hard
 
 | Check | Status | Reason |
 |---|---|---|
-| Airplane-mode cold start, GPS freshness, process-kill durability | PENDING DEVICE | App was launched with the device connected, but these workflow scenarios were not exercised. |
+| Airplane-mode cold start, GPS freshness, process-kill durability | PENDING DEVICE | Offline cold start and process-kill durability were not exercised. An indoors GPS request returned the expected “No GNSS fix yet” message; an outdoor fix was not tested. |
 | 2 GB RAM PSS, cold-start and route latency budgets | PENDING DEVICE | Pixel 8a is not a 2 GB device. No 2 GB performance claim is made. |
-| Nearby phone-to-phone pairing and transfer | PENDING DEVICES | Requires two physical Android devices with supported Google Play services and permissions. |
+| Nearby phone-to-phone pairing and transfer | PENDING DEVICES | Start/permission flow was exercised on Pixel; peer discovery, pairing confirmation, and transfer require a second physical Android device. |
 | LAN phone-to-hub sync | PENDING DEVICE | Python API behavior is covered, but Android networking is not device-validated. |
 | Background behavior, battery and radio range | PENDING DEVICES | Requires controlled tests on target phones. |
 
 ## Pixel 8a observation
 
-The connected Pixel 8a (Android 17, device codename `akita`) installed and launched the debug app. Five `dumpsys meminfo org.kavach` samples after settling were 227,101, 222,213, 222,161, 222,161 and 222,161 KiB PSS (median 222,161 KiB, about 217 MiB). This exceeds the dossier's preliminary 200 MB common-action PSS target on this phone. A separate earlier reading reached 306,667 KiB while the UI was active. This is a real-device measurement, but it does not substitute for testing the 2 GB minimum device; investigate and reduce memory before claiming the stated budget.
+The connected Pixel 8a (Android 17, device codename `akita`) installed and launched the debug app. A recent route-map reading after rendering was 191,937 KiB PSS (about 187 MiB); a recent settled home reading was 139,799 KiB. Earlier active-map captures were higher. These are spot readings from a Pixel 8a, not a 2 GB phone or a controlled memory benchmark. They do not establish the dossier's 200 MB common-action PSS target or prove 2 GB suitability.
 
 ## Important interpretation
 

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import os
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, Query
@@ -12,6 +14,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .service import Hub
+from .pack import demo_signing_key
+from .signing import sign_body
 
 ROOT = Path(__file__).resolve().parents[2]
 # Default is the REAL OpenStreetMap pack (ODbL). Set KAVACH_PACK_DIR to use another pack.
@@ -28,7 +32,16 @@ class RouteRequest(BaseModel):
     scenario_at_risk: list[str] = Field(default_factory=list, max_length=50)
 
 
-def create_app(pack_dir: Path = PACK_DIR, db_path: Path = DB_PATH) -> FastAPI:
+class DemoApprovalRequest(BaseModel):
+    asset_id: str = Field(min_length=1, max_length=128)
+    approved_status: str = Field(pattern="^(VERIFIED_OPEN|VERIFIED_CLOSED|RESTRICTED)$")
+    rationale: str = Field(min_length=1, max_length=512)
+
+
+def create_app(pack_dir: Path = PACK_DIR, db_path: Path = DB_PATH,
+               demo_approvals_enabled: bool | None = None) -> FastAPI:
+    if demo_approvals_enabled is None:
+        demo_approvals_enabled = os.environ.get("KAVACH_DEMO_MODE", "").lower() in {"1", "true", "yes"}
     db_path.parent.mkdir(parents=True, exist_ok=True)
     hub = Hub(db_path, pack_dir)
     app = FastAPI(title="SURAKSHA KAVACH local hub", version="0.2.0-prototype")
@@ -37,7 +50,29 @@ def create_app(pack_dir: Path = PACK_DIR, db_path: Path = DB_PATH) -> FastAPI:
 
     @app.get("/v1/health")
     def health():
-        return hub.health()
+        return {**hub.health(), "demo_approvals_enabled": demo_approvals_enabled}
+
+    @app.post("/v1/demo/approvals")
+    def demo_approval(req: DemoApprovalRequest):
+        if not demo_approvals_enabled:
+            return JSONResponse({"status": "disabled", "reason": "set KAVACH_DEMO_MODE=1 to enable synthetic approvals"},
+                                status_code=403)
+        key_id = "demo-supervisor-01"
+        body = {
+            "event_id": str(uuid.uuid4()),
+            "kind": "APPROVAL",
+            "asset_id": req.asset_id,
+            "approved_status": req.approved_status,
+            "approved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "rationale": req.rationale.strip(),
+            "source_class": "SIMULATED",
+            "pack_version": hub.pack_version,
+            "origin_key_id": key_id,
+        }
+        if not body["rationale"]:
+            return JSONResponse({"status": "rejected", "reason": "rationale required"}, status_code=422)
+        event = {**body, "signature": sign_body(body, demo_signing_key(key_id)), "key_id": key_id}
+        return hub.submit(event)
 
     @app.get("/v1/assets")
     def assets():
@@ -53,6 +88,14 @@ def create_app(pack_dir: Path = PACK_DIR, db_path: Path = DB_PATH) -> FastAPI:
     @app.get("/v1/features")
     def features():
         return JSONResponse(json.loads((hub.pack_dir / "features.json").read_text(encoding="utf-8")))
+
+    @app.get("/v1/india-overview")
+    def india_overview():
+        # Use the signed-pack copy when available; synthetic test packs use the checked-in snapshot.
+        path = hub.pack_dir / "india_admin1.json"
+        if not path.is_file():
+            path = ROOT / "data" / "raw" / "india-admin1-overview.json"
+        return JSONResponse(json.loads(path.read_text(encoding="utf-8")))
 
     @app.get("/v1/status")
     def status(scenario: str = Query(default="", max_length=500)):

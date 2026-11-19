@@ -19,6 +19,8 @@ class PackLoaderTest {
         assertEquals("OSM", pack.sourceClass)
         assertTrue(pack.graph.crossings.isNotEmpty())
         assertTrue(pack.features.isNotEmpty())
+        assertEquals(36, pack.indiaAreas.size)
+        assertTrue(pack.indiaAreas.any { it.code == "IN-TG" })
         assertTrue(pack.attribution.contains("OpenStreetMap contributors"))
         assertTrue(pack.graph.precomputedCriticality != null)
     }

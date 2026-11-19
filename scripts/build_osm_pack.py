@@ -30,6 +30,7 @@ sys.path.insert(0, str(ROOT / "server"))
 
 from kavach.graph import criticality, graph_from_dict  # noqa: E402
 from kavach.pack import build_pack  # noqa: E402
+from build_india_overview import OUTPUT as INDIA_OVERVIEW  # noqa: E402
 
 RAW = ROOT / "data" / "raw" / "osm-medak-kamareddy-2026-11-19.json"
 OUT = ROOT / "data" / "packs" / "kavach-osm-medak-kamareddy"
@@ -51,6 +52,10 @@ https://www.openstreetmap.org/copyright  — keep this attribution with any map 
 Extract: Overpass API, bbox 17.95,78.05 to 18.45,78.55 (Medak / Kamareddy area), retrieved 2026-11-19.
 Crossing tags (bridge=*, culvert=*, ford=*) are mapping data, not inspection results.
 Nothing in this pack was produced by a field inspection. Every crossing starts as UNKNOWN.
+
+India overview boundaries: Natural Earth Admin 1 States and Provinces (1:10m), filtered to India,
+source https://www.naturalearthdata.com/downloads/10m-cultural-vectors/10m-admin-1-states-provinces/.
+Natural Earth data is public domain. These reference boundaries are not authoritative legal limits.
 """
 
 
@@ -191,6 +196,11 @@ def main() -> None:
         })
     features_json = json.dumps({"source": "OpenStreetMap, ODbL", "features": features},
                                separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    if not INDIA_OVERVIEW.is_file():
+        raise FileNotFoundError(
+            f"{INDIA_OVERVIEW} missing; run `python scripts/build_india_overview.py` first"
+        )
+    india_overview = INDIA_OVERVIEW.read_bytes()
 
     graph = {
         "source_class": "OSM",
@@ -230,7 +240,8 @@ def main() -> None:
     crit_json = json.dumps(crit, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
     out = build_pack(OUT, graph, policy, pack_version=PACK_VERSION, licenses_text=LICENSES,
-                     extra_files={"features.json": features_json, "criticality.json": crit_json},
+                     extra_files={"features.json": features_json, "criticality.json": crit_json,
+                                  "india_admin1.json": india_overview},
                      source_class="OSM")
     # The hub reads data/packs while the APK reads its own assets. Keep both copies on
     # the exact same signed bytes whenever the source pack is rebuilt.

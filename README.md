@@ -4,16 +4,16 @@ Offline-first, human-approved decision support for flood-related road access in 
 
 ## Current implementation
 
-- **Android field app:** Compose screens for readiness, offline OSM map, reports, route comparison, isolation/inspection analysis, local hub sync, Nearby Connections, and event audit. The app verifies its signed pack before showing data. No ML model is required.
-- **Local hub:** FastAPI dashboard/API with a local SQLite append-only event store. It runs without internet; the dashboard uses no external assets.
+- **Android field app:** Compose screens for readiness, a pan/zoom India states overview, detailed offline OSM road map for Medak/Kamareddy, reports, route comparison, isolation/inspection analysis, private-LAN hub sync, Nearby Connections, and event audit. The app verifies its signed pack before showing data. No ML model is required.
+- **Coordinator dashboard:** FastAPI dashboard/API with a local SQLite append-only event store, field-report review, route comparison, an India reference overview, and the same local road-detail map. It runs without external map tiles or other web assets.
 - **Decision engine:** A* route candidates, strict and warning policies, settlement reachability, crossing criticality, inspection ranking, conflict handling, and explicit no-route results.
 - **Evidence handling:** Ed25519-signed observations and approvals, offline trust registry, immutable events, duplicate/replay rejection, and signed pack/hash validation.
-- **Map pack:** A bounded OpenStreetMap extract for Medak/Kamareddy. It is map topology only: every crossing starts `UNKNOWN`; OSM tags do not establish passability.
+- **Map pack:** A bounded OpenStreetMap extract for Medak/Kamareddy plus Natural Earth state/UT reference boundaries for the India overview. Only the Telangana extract has detailed routable roads; the national overview is not a road graph. Every crossing starts `UNKNOWN`; OSM tags do not establish passability.
 - **Synthetic fixture:** A small invented graph used for deterministic golden tests and clearly labelled demo flows.
 
 ## Important limits
 
-This is a research prototype. The phone uses a clearly labelled synthetic demo signing key, not Android Keystore provisioning. The local hub API is unauthenticated and is only suitable for an isolated demo LAN. Nearby exchange has not been validated across physical devices, and app performance has not been measured on a 2 GB phone. The app has no certified field data, live agency integration, structural inspection, guaranteed radio coverage, or autonomous dispatch. See [the threat model](docs/threat-model.md) and [the test report](docs/test-report.md).
+This is a research prototype. The phone uses a clearly labelled synthetic demo signing key, not Android Keystore provisioning. The local hub API is unauthenticated and accepts signatures from synthetic demo keys; keep it on a controlled private demo network and do not publish or expose it to the internet. The optional dashboard approval route is disabled unless `KAVACH_DEMO_MODE=1`, and remains synthetic when enabled. Nearby exchange has not been validated across two physical devices, and app performance has not been measured on a 2 GB phone. The app has no certified field data, live agency integration, structural inspection, guaranteed radio coverage, or autonomous dispatch. See [the threat model](docs/threat-model.md) and [the test report](docs/test-report.md).
 
 ## Run the local hub
 
@@ -34,11 +34,11 @@ Open `http://127.0.0.1:8000/`. The default hub uses the OSM pack; the demo-pack 
 
 Open `android/` in Android Studio with JDK 17 and an installed Android SDK, then build and run the `app` configuration. The APK bundles its map pack and performs no map tile requests. `scripts/build_osm_pack.py` rebuilds the OSM pack and synchronizes its exact signed files into the APK assets.
 
-The Android project and 19 Kotlin unit tests build successfully with Gradle 8.11.1, JDK 21, and Android SDK platform 34. The debug APK was installed and launched on a connected Pixel 8a running Android 17. That phone is not a 2 GB device, and observed PSS exceeded the dossier's preliminary 200 MB target; 2 GB suitability is not established. See [the test report](docs/test-report.md) for measurements and pending field checks.
+The Android project and 22 Kotlin unit tests build successfully with Gradle 8.11.1, JDK 21, and Android SDK platform 34. The debug APK was installed and exercised on a connected Pixel 8a running Android 17. The Pixel is not a 2 GB device; the dossier's 200 MB target and 2 GB suitability are not established. See [the test report](docs/test-report.md) for measurements and pending field checks.
 
 ## Rebuild the checked-in OSM pack
 
-The source extract is `data/raw/osm-medak-kamareddy-2026-11-19.json` (OSM/ODbL). Rebuild with:
+The source extract is `data/raw/osm-medak-kamareddy-2026-11-19.json` (OSM/ODbL). The India overview snapshot is `data/raw/india-admin1-overview.json`; `scripts/build_india_overview.py` refreshes it from a hash-pinned Natural Earth source. Rebuild the OSM pack with:
 
 ```powershell
 python scripts/build_osm_pack.py

@@ -10,6 +10,7 @@ class PackException(message: String) : Exception(message)
 
 /** A water line for the map: river, stream, canal or drain (OpenStreetMap, ODbL). */
 data class MapFeature(val kind: String, val name: String, val coords: List<Pair<Double, Double>>)
+data class IndiaAdminArea(val name: String, val code: String, val rings: List<List<Pair<Double, Double>>>)
 
 data class Pack(
     val packVersion: String,
@@ -18,6 +19,7 @@ data class Pack(
     val graph: RoadGraph,
     val trust: TrustRegistry,
     val features: List<MapFeature>,
+    val indiaAreas: List<IndiaAdminArea>,
     val attribution: String,
 )
 
@@ -76,6 +78,7 @@ object PackLoader {
         }
 
         val features = contents["features.json"]?.let { parseFeatures(it) } ?: emptyList()
+        val indiaAreas = contents["india_admin1.json"]?.let { parseIndiaAreas(it) } ?: emptyList()
 
         return Pack(
             packVersion = manifest["pack_version"] as String,
@@ -84,6 +87,7 @@ object PackLoader {
             graph = graph,
             trust = TrustRegistry(entries),
             features = features,
+            indiaAreas = indiaAreas,
             attribution = (contents["LICENSES.txt"]?.let { String(it, Charsets.UTF_8) } ?: "").trim(),
         )
     }
@@ -99,6 +103,33 @@ object PackLoader {
                 kind = f["kind"] as String,
                 name = (f["name"] as? String) ?: "",
                 coords = (f["coords"] as List<List<Number>>).map { it[0].toDouble() to it[1].toDouble() },
+            )
+        }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun parseIndiaAreas(bytes: ByteArray): List<IndiaAdminArea> {
+        val root = asMap(Json.parse(String(bytes, Charsets.UTF_8)))
+        val features = root["features"] as? List<Map<String, Any?>>
+            ?: throw PackException("india_admin1.json has no features")
+        return features.map { feature ->
+            val rings = (feature["rings"] as? List<List<List<Number>>>)
+                ?: throw PackException("invalid India map rings")
+            val coords = rings.map { ring ->
+                if (ring.size < 4) throw PackException("India map ring is too short")
+                ring.map { point ->
+                    if (point.size != 2) throw PackException("invalid India map point")
+                    val lon = point[0].toDouble()
+                    val lat = point[1].toDouble()
+                    if (!lon.isFinite() || !lat.isFinite() || lon !in 60.0..100.0 || lat !in -5.0..45.0)
+                        throw PackException("India map point is outside supported bounds")
+                    lat to lon
+                }
+            }
+            IndiaAdminArea(
+                name = feature["name"] as? String ?: throw PackException("India map area has no name"),
+                code = feature["code"] as? String ?: throw PackException("India map area has no code"),
+                rings = coords,
             )
         }
     }

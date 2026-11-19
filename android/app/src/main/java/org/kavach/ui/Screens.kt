@@ -12,8 +12,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -38,7 +38,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -64,7 +63,7 @@ fun statusColor(status: String): Color = when (status) {
 }
 
 @Composable
-fun AppScreen(vm: KavachViewModel) {
+fun AppScreen(vm: KavachViewModel, onRequestLocation: () -> Unit, onStartNearby: () -> Unit) {
     val state by vm.packState.collectAsState()
     when (val s = state) {
         is PackState.Loading -> Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center,
@@ -77,14 +76,13 @@ fun AppScreen(vm: KavachViewModel) {
             Text(s.message)
             Text("The app will not show routes from an unverified pack.")
         }
-        is PackState.Ready -> ReadyApp(vm)
+        is PackState.Ready -> ReadyApp(vm, onRequestLocation, onStartNearby)
     }
 }
 
 @Composable
-private fun ReadyApp(vm: KavachViewModel) {
+private fun ReadyApp(vm: KavachViewModel, onRequestLocation: () -> Unit, onStartNearby: () -> Unit) {
     var tab by remember { mutableIntStateOf(0) }
-    val context = LocalContext.current
     LaunchedEffect(Unit) { vm.refresh() }
     Column(Modifier.fillMaxSize()) {
         Banner()
@@ -98,10 +96,14 @@ private fun ReadyApp(vm: KavachViewModel) {
             when (tab) {
                 0 -> HomeScreen(vm)
                 1 -> MapScreen(vm)
-                2 -> ReportScreen(vm, context)
-                3 -> RoutesScreen(vm)
+                2 -> ReportScreen(vm, onRequestLocation)
+                3 -> RoutesScreen(vm) {
+                    vm.selectedMapArea = "IN-TG"
+                    vm.showLocalDetail = true
+                    tab = 1
+                }
                 4 -> AnalysisScreen(vm)
-                5 -> SyncScreen(vm, context)
+                5 -> SyncScreen(vm, onStartNearby)
                 else -> AuditScreen(vm)
             }
         }
@@ -168,19 +170,54 @@ private fun ageText(createdAt: String): String = try {
 @Composable
 private fun MapScreen(vm: KavachViewModel) {
     val graph = vm.graph() ?: return
-    Section("Real road map · Medak / Kamareddy") {
-        RealMap(
-            graph = graph,
-            features = vm.features(),
-            statuses = vm.statuses,
-            selected = vm.selectedCrossing,
-            onSelect = { vm.selectedCrossing = it },
-        )
-        Text("Pinch to zoom, drag to pan, tap a thick line (bridge, culvert or ford) to inspect it.",
-            fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+    val areas = vm.indiaAreas()
+    val selectedArea = areas.firstOrNull { it.code == vm.selectedMapArea }
+    if (!vm.showLocalDetail) {
+        Section("India offline overview · ${areas.size} states and union territories") {
+            IndiaOverviewMap(areas, vm.selectedMapArea) { vm.selectedMapArea = it }
+            if (areas.isNotEmpty()) {
+                NodePicker("Select a state or union territory", areas.map { it.code to it.name },
+                    vm.selectedMapArea) { vm.selectedMapArea = it }
+            }
+            Text(
+                if (selectedArea?.code == "IN-TG")
+                    "Detailed OSM roads are installed for Medak / Kamareddy, Telangana."
+                else "${selectedArea?.name ?: "This area"} has overview boundaries only; no detailed road pack is installed.",
+                fontSize = 13.sp,
+            )
+            if (selectedArea?.code == "IN-TG") {
+                Button(onClick = { vm.showLocalDetail = true }, modifier = Modifier.padding(top = 8.dp)) {
+                    Text("Open Telangana road detail")
+                }
+            }
+        }
+    } else {
+        Section("Detailed offline road map · Medak / Kamareddy, Telangana") {
+            OutlinedButton(onClick = { vm.showLocalDetail = false }) { Text("Back to India overview") }
+            RealMap(
+                graph = graph,
+                features = vm.features(),
+                statuses = vm.statuses,
+                selected = vm.selectedCrossing,
+                onSelect = { vm.selectedCrossing = it },
+                highlightedEdges = vm.highlightedRouteEdges,
+            )
+            Text("Pinch to zoom, drag to pan, tap a thick line (bridge, culvert or ford) to inspect it.",
+                fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+            if (vm.highlightedRouteEdges.isNotEmpty()) {
+                val matched = vm.highlightedRouteEdges.count { it in graph.edges }
+                Text(
+                    if (matched == vm.highlightedRouteEdges.size)
+                        "Teal line with a light outline: the most recently computed candidate route (${matched} segments)."
+                    else "Route map mismatch: $matched of ${vm.highlightedRouteEdges.size} route segments match this map. Recompute before using this view.",
+                    fontSize = 12.sp,
+                    color = if (matched == vm.highlightedRouteEdges.size) Color(0xFF00695C) else Color(0xFFB3261E),
+                )
+            }
+        }
     }
     val sel = vm.selectedCrossing
-    if (sel != null) {
+    if (vm.showLocalDetail && sel != null) {
         val st = vm.statuses[sel]
         val dep = vm.inspection.firstOrNull { it.crossingId == sel }
         Section("Crossing $sel") {
@@ -203,22 +240,22 @@ private fun MapScreen(vm: KavachViewModel) {
 }
 
 @Composable
-private fun ReportScreen(vm: KavachViewModel, context: android.content.Context) {
+private fun ReportScreen(vm: KavachViewModel, onRequestLocation: () -> Unit) {
     val graph = vm.graph() ?: return
     val crossings = remember(graph) { graph.crossings.keys.sorted() }
+    val crossingOptions = remember(graph) {
+        crossings.map { id -> id to "$id · ${graph.crossings[id]?.kind ?: "crossing"}" }
+    }
     var type by remember { mutableStateOf("CLOSED") }
     var note by remember { mutableStateOf("") }
     val asset = vm.selectedCrossing ?: crossings.firstOrNull() ?: ""
     Section("New observation (saved as a claim, not verified)") {
-        Text("Crossing (tap one on the Map tab, or pick here)")
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            items(crossings) { c ->
-                FilterChip(selected = asset == c, onClick = { vm.selectedCrossing = c }, label = { Text(c) })
-            }
+        NodePicker("Crossing (tap one on the Map tab, or choose here)", crossingOptions, asset) {
+            vm.selectedCrossing = it
         }
         Text("Observed", Modifier.padding(top = 8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            listOf("WATER", "BLOCKAGE", "CLOSED", "OPEN", "UNKNOWN").forEach { t ->
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            items(listOf("WATER", "BLOCKAGE", "CLOSED", "OPEN", "UNKNOWN")) { t ->
                 FilterChip(selected = type == t, onClick = { type = t }, label = { Text(t) })
             }
         }
@@ -233,8 +270,10 @@ private fun ReportScreen(vm: KavachViewModel, context: android.content.Context) 
             Modifier.padding(top = 6.dp),
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 6.dp)) {
-            Button(onClick = { vm.requestFix(context) }) { Text("Get GPS fix") }
-            Button(onClick = { vm.submitObservation(asset, type, note) }) { Text("Save report") }
+            Button(onClick = onRequestLocation) { Text("Get GPS fix") }
+            Button(onClick = { vm.submitObservation(asset, type, note) }, enabled = asset.isNotBlank()) {
+                Text("Save report")
+            }
         }
         if (vm.message.isNotEmpty()) Text(vm.message, Modifier.padding(top = 8.dp))
     }
@@ -257,12 +296,16 @@ private fun NodePicker(label: String, nodes: List<Pair<String, String>>, selecte
 }
 
 @Composable
-private fun RoutesScreen(vm: KavachViewModel) {
+private fun RoutesScreen(vm: KavachViewModel, onShowMap: () -> Unit) {
     val graph = vm.graph() ?: return
     val places = remember(graph) {
         graph.nodes.values.filter { it.kind != "junction" }
             .map { it.id to (it.name.ifEmpty { it.id }) }
             .sortedBy { it.second }
+    }
+    if (places.isEmpty()) {
+        Section("Route planning unavailable") { Text("This pack has no routable settlements or facilities.") }
+        return
     }
     var origin by remember(graph) { mutableStateOf(places.firstOrNull { it.second.startsWith("Kamareddy") }?.first ?: places.first().first) }
     var dest by remember(graph) {
@@ -293,10 +336,12 @@ private fun RoutesScreen(vm: KavachViewModel) {
         Button(onClick = { vm.computeRoute(origin, dest, vehicle, policy) }, modifier = Modifier.padding(top = 8.dp)) {
             Text("Compute route")
         }
+        if (vm.message.startsWith("Route could not")) Text(vm.message, color = Color(0xFFB3261E))
     }
     vm.route?.let { r ->
         Section("Result: ${r.result}") {
             if (r.path.isNotEmpty()) Text("Road nodes on route: ${r.path.size}; segments: ${r.edges.size}")
+            if (r.path.isNotEmpty()) OutlinedButton(onClick = onShowMap) { Text("Show route on map") }
             r.travelTimeS?.let { Text("Estimated travel time: ${it.toInt()} s at class speeds (not measured)") }
             Text(r.caveat, fontSize = 13.sp)
             Text("Graph ${r.graphVersion} · policy ${r.policy}", fontSize = 12.sp)
@@ -338,7 +383,7 @@ private fun AnalysisScreen(vm: KavachViewModel) {
 }
 
 @Composable
-private fun SyncScreen(vm: KavachViewModel, context: android.content.Context) {
+private fun SyncScreen(vm: KavachViewModel, onStartNearby: () -> Unit) {
     Section("Local hub (Wi-Fi hotspot / router LAN)") {
         OutlinedTextField(
             value = vm.hubUrl, onValueChange = { vm.hubUrl = it },
@@ -349,7 +394,7 @@ private fun SyncScreen(vm: KavachViewModel, context: android.content.Context) {
     }
     Section("Nearby phones (no internet, needs Play services)") {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { vm.startNearby(context, "kavach-" + (1000..9999).random()) }) { Text("Start") }
+            Button(onClick = onStartNearby) { Text("Start") }
             Button(onClick = { vm.stopNearby() }) { Text("Stop") }
         }
         val relay = vm.nearby

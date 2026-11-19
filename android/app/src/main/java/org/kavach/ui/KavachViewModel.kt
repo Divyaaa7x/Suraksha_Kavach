@@ -29,6 +29,14 @@ import org.kavach.sync.NearbyRelay
 /** Screen state and actions. Heavy work runs on Dispatchers.IO; screens only read plain state. */
 class KavachViewModel(application: Application) : AndroidViewModel(application) {
 
+    private data class RefreshSnapshot(
+        val statuses: Map<String, StatusView>,
+        val counts: Pair<Int, Int>,
+        val events: List<EventEntity>,
+        val isolated: List<Isolated>,
+        val inspection: List<InspectionRow>,
+    )
+
     private val app = application as KavachApp
     val packState: kotlinx.coroutines.flow.StateFlow<PackState> = app.packState
 
@@ -46,6 +54,9 @@ class KavachViewModel(application: Application) : AndroidViewModel(application) 
         private set
     var shortest by mutableStateOf<ShortestPath?>(null)
         private set
+    var highlightedRouteEdges by mutableStateOf<Set<String>>(emptySet())
+        private set
+    var showLocalDetail by mutableStateOf(false)
     var isolated by mutableStateOf<List<Isolated>>(emptyList())
         private set
     var inspection by mutableStateOf<List<InspectionRow>>(emptyList())
@@ -55,14 +66,17 @@ class KavachViewModel(application: Application) : AndroidViewModel(application) 
     var fix by mutableStateOf<Fix?>(null)
         private set
     var selectedCrossing by mutableStateOf<String?>(null)
+    var selectedMapArea by mutableStateOf("IN-TG")
     var scenario by mutableStateOf("")
     var hubUrl by mutableStateOf("http://192.168.1.1:8000")
-    var nearby: NearbyRelay? = null
+    var nearby by mutableStateOf<NearbyRelay?>(null)
         private set
 
     fun graph(): RoadGraph? = ready?.pack?.graph
 
     fun features(): List<org.kavach.pack.MapFeature> = ready?.pack?.features ?: emptyList()
+
+    fun indiaAreas(): List<org.kavach.pack.IndiaAdminArea> = ready?.pack?.indiaAreas ?: emptyList()
 
     fun packInfo(): Pair<String, String> = ready?.pack?.let { it.packVersion to it.createdAt } ?: ("none" to "")
 
@@ -73,11 +87,21 @@ class KavachViewModel(application: Application) : AndroidViewModel(application) 
         val n = node ?: return
         val scen = scenarioSet()
         viewModelScope.launch {
-            statuses = withContext(Dispatchers.IO) { n.statuses(scen) }
-            counts = withContext(Dispatchers.IO) { n.counts() }
-            events = withContext(Dispatchers.IO) { n.allEvents() }.asReversed()
-            isolated = withContext(Dispatchers.IO) { n.isolated("light", Policy.STRICT, scen) }
-            inspection = withContext(Dispatchers.IO) { n.inspection(scen) }
+            try {
+                val snapshot = withContext(Dispatchers.IO) {
+                    RefreshSnapshot(
+                        n.statuses(scen), n.counts(), n.allEvents(),
+                        n.isolated("light", Policy.STRICT, scen), n.inspection(scen),
+                    )
+                }
+                statuses = snapshot.statuses
+                counts = snapshot.counts
+                events = snapshot.events.asReversed()
+                isolated = snapshot.isolated
+                inspection = snapshot.inspection
+            } catch (e: Exception) {
+                message = "Could not refresh local data: ${e.message ?: e.javaClass.simpleName}"
+            }
         }
     }
 
@@ -85,16 +109,37 @@ class KavachViewModel(application: Application) : AndroidViewModel(application) 
         val n = node ?: return
         val scen = scenarioSet()
         viewModelScope.launch {
-            route = withContext(Dispatchers.IO) { n.route(origin, dest, vehicle, policy, scen) }
-            shortest = withContext(Dispatchers.IO) { n.shortest(origin, dest) }
+            try {
+                val results = withContext(Dispatchers.IO) {
+                    n.route(origin, dest, vehicle, policy, scen) to n.shortest(origin, dest)
+                }
+                route = results.first
+                shortest = results.second
+                highlightedRouteEdges = results.first.edges.toSet()
+                message = ""
+            } catch (e: Exception) {
+                route = null
+                shortest = null
+                message = "Route could not be computed: ${e.message ?: e.javaClass.simpleName}"
+            }
         }
     }
 
     fun requestFix(context: Context) {
         viewModelScope.launch {
-            val f = Gps.oneFix(context)
+            message = "Waiting for a GNSS fix…"
+            val f = try { Gps.oneFix(context) } catch (_: SecurityException) {
+                fix = null
+                message = "Precise location permission is required. Tap Get GPS fix and allow it."
+                return@launch
+            } catch (e: Exception) {
+                fix = null
+                message = "Could not read GNSS: ${e.message ?: e.javaClass.simpleName}"
+                return@launch
+            }
             fix = f
-            message = if (f == null) "No GNSS fix. Move outdoors and try again." else "Fix acquired"
+            message = if (f == null) "No GNSS fix yet. Check location is enabled, move outdoors and try again."
+                else "Fix acquired (±${f.accuracyM.toInt()} m)"
         }
     }
 
@@ -111,14 +156,18 @@ class KavachViewModel(application: Application) : AndroidViewModel(application) 
             return
         }
         viewModelScope.launch {
-            val wire = Signed.observation(assetId, type, f.lat, f.lon, f.accuracyM, note, n.packVersion)
-            val res = withContext(Dispatchers.IO) { n.submit(wire) }
-            message = when (res.status) {
-                "accepted" -> "Saved on this phone as a signed claim. It syncs later and is not verified."
-                "duplicate" -> "Already saved."
-                else -> "Rejected: ${res.reason}"
+            try {
+                val wire = Signed.observation(assetId, type, f.lat, f.lon, f.accuracyM, note, n.packVersion)
+                val res = withContext(Dispatchers.IO) { n.submit(wire) }
+                message = when (res.status) {
+                    "accepted" -> "Saved on this phone as a signed claim. It syncs later and is not verified."
+                    "duplicate" -> "Already saved."
+                    else -> "Rejected: ${res.reason}"
+                }
+                refresh()
+            } catch (e: Exception) {
+                message = "Could not save report: ${e.message ?: e.javaClass.simpleName}"
             }
-            refresh()
         }
     }
 
@@ -138,11 +187,19 @@ class KavachViewModel(application: Application) : AndroidViewModel(application) 
 
     fun startNearby(context: Context, deviceName: String) {
         val n = node ?: return
-        val relay = nearby ?: NearbyRelay(context, n, deviceName).also { nearby = it }
-        relay.start()
+        try {
+            val relay = nearby ?: NearbyRelay(context, n, deviceName).also { nearby = it }
+            relay.start()
+        } catch (e: Exception) {
+            message = "Nearby could not start: ${e.message ?: e.javaClass.simpleName}"
+        }
     }
 
     fun stopNearby() {
         nearby?.stop()
+    }
+
+    fun showMessage(value: String) {
+        message = value
     }
 }

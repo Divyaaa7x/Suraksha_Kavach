@@ -5,6 +5,21 @@ import org.kavach.service.KavachNode
 import java.net.HttpURLConnection
 import java.net.URL
 
+internal fun isPrivateHubUrl(url: URL): Boolean {
+    if (url.protocol !in setOf("http", "https") || url.userInfo != null || url.query != null || url.ref != null) return false
+    if (url.port != -1 && url.port !in 1..65535) return false
+    if (url.path.isNotEmpty() && url.path != "/") return false
+    val host = url.host.lowercase()
+    if (host == "localhost" || host == "10.0.2.2") return true
+    if (host.any { it !in '0'..'9' && it != '.' }) return false
+    val octets = host.split('.').map { it.toIntOrNull() ?: return false }
+    if (octets.size != 4 || octets.any { it !in 0..255 }) return false
+    return octets[0] == 10 ||
+        (octets[0] == 192 && octets[1] == 168) ||
+        (octets[0] == 172 && octets[1] in 16..31) ||
+        octets[0] == 127
+}
+
 /**
  * Sync with the local command hub over the hotspot / router LAN. No internet is involved. The hub
  * URL must be a private address; network_security_config.xml enforces that for cleartext HTTP.
@@ -13,15 +28,9 @@ class LanSync(private val node: KavachNode) {
 
     data class Outcome(val pushed: Int, val rejected: Int, val pulled: Int, val message: String)
 
-    private fun isPrivate(url: URL): Boolean {
-        val h = url.host
-        return h == "localhost" || h == "10.0.2.2" || h.startsWith("192.168.") || h.startsWith("10.") ||
-            Regex("""172\.(1[6-9]|2\d|3[01])\..*""").matches(h)
-    }
-
     suspend fun sync(baseUrl: String): Outcome {
         val base = URL(baseUrl.trimEnd('/'))
-        require(isPrivate(base)) { "hub must be on a private LAN address" }
+        require(isPrivateHubUrl(base)) { "hub must be an HTTP(S) service on a private LAN IPv4 address" }
 
         // Push: our unsynced events go to the hub, which validates each one.
         val pending = node.pendingWire()

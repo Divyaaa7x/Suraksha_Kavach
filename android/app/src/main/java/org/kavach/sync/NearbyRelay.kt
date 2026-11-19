@@ -52,6 +52,7 @@ class NearbyRelay(
     val log: StateFlow<String> = _log.asStateFlow()
 
     private val pendingAccept = HashMap<String, String>() // endpointId -> code shown for confirmation
+    @Volatile private var started = false
 
     private fun setPeer(p: Peer) {
         _peers.value = _peers.value.filter { it.endpointId != p.endpointId } + p
@@ -91,26 +92,30 @@ class NearbyRelay(
         override fun onPayloadReceived(endpointId: String, payload: Payload) {
             val bytes = payload.asBytes() ?: return
             scope.launch {
-                val text = String(bytes, Charsets.UTF_8)
-                if (text.startsWith(ACK_PREFIX)) {
-                    // Peer confirms it stored these events, so they are no longer pending here.
-                    val ids = (Json.parse(text.removePrefix(ACK_PREFIX)) as List<*>).map { it as String }
-                    node.markSynced(ids)
-                    _log.value = "Peer stored ${ids.size} events"
-                    return@launch
+                try {
+                    val text = String(bytes, Charsets.UTF_8)
+                    if (text.startsWith(ACK_PREFIX)) {
+                        // Peer confirms it stored these events, so they are no longer pending here.
+                        val ids = (Json.parse(text.removePrefix(ACK_PREFIX)) as List<*>).map { it as String }
+                        node.markSynced(ids)
+                        _log.value = "Peer stored ${ids.size} events"
+                        return@launch
+                    }
+                    val list = Json.parse(text) as List<*>
+                    val storedIds = ArrayList<String>()
+                    for (item in list) {
+                        @Suppress("UNCHECKED_CAST")
+                        val raw = item as Map<String, Any?>
+                        val res = node.submit(raw, receivedAt = raw["received_at"] as? String)
+                        if (res.status == "accepted" || res.status == "duplicate") storedIds.add(res.eventId!!)
+                    }
+                    // Only after the local write succeeds do we acknowledge, so the sender keeps anything unconfirmed.
+                    val ack = ACK_PREFIX + Json.canonical(storedIds)
+                    client.sendPayload(endpointId, Payload.fromBytes(ack.toByteArray(Charsets.UTF_8)))
+                    _log.value = "Received ${list.size} events from peer, stored ${storedIds.size}"
+                } catch (e: Exception) {
+                    _log.value = "Invalid nearby transfer: ${e.message ?: e.javaClass.simpleName}"
                 }
-                val list = Json.parse(text) as List<*>
-                val storedIds = ArrayList<String>()
-                for (item in list) {
-                    @Suppress("UNCHECKED_CAST")
-                    val raw = item as Map<String, Any?>
-                    val res = node.submit(raw, receivedAt = raw["received_at"] as? String)
-                    if (res.status == "accepted" || res.status == "duplicate") storedIds.add(res.eventId!!)
-                }
-                // Only after the local write succeeds do we acknowledge, so the sender keeps anything unconfirmed.
-                val ack = ACK_PREFIX + Json.canonical(storedIds)
-                client.sendPayload(endpointId, Payload.fromBytes(ack.toByteArray(Charsets.UTF_8)))
-                _log.value = "Received ${list.size} events from peer, stored ${storedIds.size}"
             }
         }
 
@@ -128,15 +133,21 @@ class NearbyRelay(
     }
 
     fun start() {
+        if (started) return
+        started = true
+        _log.value = "Starting nearby discovery…"
         client.startAdvertising(
             deviceName, SERVICE_ID, lifecycle,
             AdvertisingOptions.Builder().setStrategy(Strategy.P2P_CLUSTER).build(),
-        ).addOnFailureListener { _log.value = "advertising failed: ${it.message}" }
+        ).addOnFailureListener {
+            if (started) _log.value = "Nearby advertising failed: ${it.message}"
+        }
         client.startDiscovery(
             SERVICE_ID, discovery,
             DiscoveryOptions.Builder().setStrategy(Strategy.P2P_CLUSTER).build(),
-        ).addOnFailureListener { _log.value = "discovery failed: ${it.message}" }
-        _log.value = "advertising and discovering nearby phones"
+        ).addOnFailureListener {
+            if (started) _log.value = "Nearby discovery failed: ${it.message}"
+        }
     }
 
     fun requestConnection(endpointId: String) {
@@ -161,10 +172,16 @@ class NearbyRelay(
             return
         }
         // Not marked synced here: the peer's ACK does that (see onPayloadReceived).
-        client.sendPayload(endpointId, Payload.fromBytes(Json.canonical(wire).toByteArray(Charsets.UTF_8)))
+        val batches = NearbyPayloads.eventBatches(wire)
+        batches.forEachIndexed { index, bytes ->
+            client.sendPayload(endpointId, Payload.fromBytes(bytes))
+                .addOnFailureListener { _log.value = "Nearby batch ${index + 1} failed: ${it.message}" }
+        }
+        _log.value = "Sending ${wire.size} events in ${batches.size} Nearby batch(es)"
     }
 
     fun stop() {
+        started = false
         client.stopAllEndpoints()
         client.stopAdvertising()
         client.stopDiscovery()
