@@ -20,6 +20,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import math
+import shutil
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -231,9 +232,17 @@ def main() -> None:
     out = build_pack(OUT, graph, policy, pack_version=PACK_VERSION, licenses_text=LICENSES,
                      extra_files={"features.json": features_json, "criticality.json": crit_json},
                      source_class="OSM")
+    # The hub reads data/packs while the APK reads its own assets. Keep both copies on
+    # the exact same signed bytes whenever the source pack is rebuilt.
+    android_pack = ROOT / "android" / "app" / "src" / "main" / "assets" / "pack"
+    android_pack.mkdir(parents=True, exist_ok=True)
+    for path in OUT.iterdir():
+        if path.is_file():
+            shutil.copyfile(path, android_pack / path.name)
     print(json.dumps(policy["counts"], indent=2))
     print(f"unlinked places/facilities: {len(unlinked)}")
     print(f"built {out}")
+    print(f"synced signed APK assets to {android_pack}")
 
 
 if __name__ == "__main__":

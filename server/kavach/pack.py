@@ -72,7 +72,9 @@ def build_pack(out_dir: str | Path, graph_dict: dict, policy: dict, pack_version
     mbytes = canonical_bytes(manifest)
     (out / "manifest.json").write_bytes(mbytes)
     sig = SigningKey(DEMO_PACK_SIGNER_SEED).sign(mbytes).signature.hex()
-    (out / "signature.json").write_text(json.dumps({"alg": "ed25519", "signature": sig}, indent=2))
+    # Use explicit LF bytes so a generated signed pack is deterministic across OSes.
+    signature_doc = json.dumps({"alg": "ed25519", "signature": sig}, indent=2) + "\n"
+    (out / "signature.json").write_bytes(signature_doc.encode("utf-8"))
     return out
 
 
