@@ -34,7 +34,7 @@ Open `http://127.0.0.1:8000/`. The default hub uses the OSM pack; the demo-pack 
 
 Open `android/` in Android Studio with JDK 17 and an installed Android SDK, then build and run the `app` configuration. The APK bundles its map pack and performs no map tile requests. `scripts/build_osm_pack.py` rebuilds the OSM pack and synchronizes its exact signed files into the APK assets.
 
-The Android build has not been run in this workspace because Android Studio/SDK, Gradle, and `adb` are unavailable here. Physical-device requirements remain pending; see [the test report](docs/test-report.md).
+The Android project and 19 Kotlin unit tests build successfully with Gradle 8.11.1, JDK 21, and Android SDK platform 34. The debug APK was installed and launched on a connected Pixel 8a running Android 17. That phone is not a 2 GB device, and observed PSS exceeded the dossier's preliminary 200 MB target; 2 GB suitability is not established. See [the test report](docs/test-report.md) for measurements and pending field checks.
 
 ## Rebuild the checked-in OSM pack
 
