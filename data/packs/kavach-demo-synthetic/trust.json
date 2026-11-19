@@ -1,0 +1,18 @@
+{
+  "entries": [
+    {
+      "expires_at": "2030-01-01T00:00:00+00:00",
+      "key_id": "demo-responder-01",
+      "public_key_hex": "f17cbe78c2dbef8bcfff9cb75fde9ffdbf8747f6467e188d7eb6cfe1c3830d31",
+      "role": "field_responder",
+      "scope": "*"
+    },
+    {
+      "expires_at": "2030-01-01T00:00:00+00:00",
+      "key_id": "demo-supervisor-01",
+      "public_key_hex": "502581a5493cbc12ed1d809e380530782232e0e1e6c1ee42b9e18603468dd290",
+      "role": "supervisor",
+      "scope": "*"
+    }
+  ]
+}

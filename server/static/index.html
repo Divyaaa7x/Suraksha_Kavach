@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SURAKSHA KAVACH — Command Hub</title>
+<style>
+  :root { --bg:#f6f7f9; --fg:#14171c; --muted:#5b6470; --card:#fff; --line:#c9ced6;
+          --ok:#1b7f3b; --warn:#a15c00; --bad:#b3261e; --unk:#6b4fbb; --dis:#8a2be2; --pred:#0b6e99; --stale:#5b6470; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+    --bg:#0f1216; --fg:#e8ebf0; --muted:#9aa4b2; --card:#181d24; --line:#384150;
+    --ok:#4ccf7a; --warn:#f0a844; --bad:#ff7a70; --unk:#b9a3ff; --dis:#d59cff; --pred:#63c7ea; --stale:#9aa4b2; } }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.4 system-ui, sans-serif; background:var(--bg); color:var(--fg); }
+  header { padding:12px 16px; background:var(--card); border-bottom:1px solid var(--line); }
+  h1 { margin:0; font-size:18px; }
+  .banner { background:#fff3cd; color:#533f03; padding:8px 16px; font-size:13px; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .banner { background:#3a2f0b; color:#ffe9a8; } }
+  main { display:grid; grid-template-columns: minmax(0,2fr) minmax(0,1fr); gap:12px; padding:12px; }
+  @media (max-width: 800px) { main { grid-template-columns: 1fr; } }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px; }
+  h2 { font-size:15px; margin:0 0 8px; }
+  #mapwrap { position:relative; }
+  canvas#map { width:100%; height:560px; display:block; background:#eef1ee; border-radius:8px; cursor:grab; touch-action:none; }
+  .attrib { position:absolute; right:8px; bottom:6px; font-size:11px; background:rgba(255,255,255,.85); color:#222; padding:2px 6px; border-radius:4px; }
+  .legend span { display:inline-block; margin:2px 8px 2px 0; font-size:12px; }
+  .dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:4px; vertical-align:middle; }
+  label { display:block; font-size:13px; color:var(--muted); margin-top:8px; }
+  select, input, button { font:inherit; padding:8px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--fg); width:100%; }
+  button { background:var(--fg); color:var(--bg); cursor:pointer; margin-top:10px; font-weight:600; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  td, th { text-align:left; padding:6px 4px; border-bottom:1px solid var(--line); vertical-align:top; }
+  .badge { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; border:1px solid currentColor; }
+  pre { white-space:pre-wrap; word-break:break-word; font-size:12px; background:var(--bg); padding:8px; border-radius:8px; max-height:260px; overflow:auto; }
+  .muted { color:var(--muted); font-size:13px; }
+  .detail { font-size:13px; margin-top:8px; min-height:2em; }
+</style>
+</head>
+<body>
+<header>
+  <h1>SURAKSHA KAVACH · Command Hub <span class="muted" id="hstat">connecting…</span></h1>
+</header>
+<div class="banner">Decision support only. A human approves every access decision. Map data: OpenStreetMap (ODbL). Crossing status is UNKNOWN until a report or approval says otherwise. Works with the internet off.</div>
+<main>
+  <section class="card">
+    <h2>Real road network · Medak / Kamareddy</h2>
+    <div id="mapwrap">
+      <canvas id="map" aria-label="Road network with crossing status; drag to pan, wheel to zoom"></canvas>
+      <div class="attrib">© OpenStreetMap contributors · ODbL</div>
+    </div>
+    <div class="legend" id="legend"></div>
+    <div class="detail" id="detail">Tap a crossing (thick line) to see its status and what depends on it.</div>
+    <p class="muted" id="gver"></p>
+  </section>
+
+  <section>
+    <div class="card">
+      <h2>Compare routes</h2>
+      <label>From <select id="origin"></select></label>
+      <label>To <select id="dest"></select></label>
+      <label>Vehicle class
+        <select id="vehicle"><option>light</option><option>medium</option><option>heavy</option></select></label>
+      <label>Policy
+        <select id="policy"><option value="strict">strict (verified only)</option>
+          <option value="unverified_warning">unverified allowed with warning</option></select></label>
+      <label>Scenario overlay: crossings at risk (demo only, comma separated)
+        <input id="scenario" placeholder="e.g. OSM-W123,OSM-W456"></label>
+      <button id="go">Compute route</button>
+      <pre id="routeOut">Press "Compute route".</pre>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <h2>Isolated settlements (strict)</h2>
+      <div id="iso" class="muted">loading…</div>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <h2>Inspect first (criticality)</h2>
+      <table><thead><tr><th>Crossing</th><th>Status</th><th>Cut off if closed</th></tr></thead>
+      <tbody id="insp"></tbody></table>
+    </div>
+  </section>
+</main>
+<script>
+const COLORS = { UNKNOWN:'#6b4fbb', REPORTED_OPEN:'#a15c00', REPORTED_CLOSED:'#a15c00', VERIFIED_OPEN:'#1b7f3b',
+  VERIFIED_CLOSED:'#b3261e', RESTRICTED:'#a15c00', DISPUTED:'#8a2be2', STALE:'#5b6470', PREDICTED_RISK:'#0b6e99' };
+const WATER = { river:'#4a90c2', stream:'#7fb4d9', canal:'#3f7fb0', drain:'#9cc3e0' };
+const ROAD_W = { motorway:3, trunk:3, primary:2.5, secondary:2, tertiary:1.6, unclassified:1.2, residential:1 };
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+let G = null, F = null, ST = {}, view = {x:0, y:0, k:1}, bounds, roadPath = null, crossEdges = [], selected = null;
+const canvas = $('map'), ctx = canvas.getContext('2d');
+
+async function j(url, opts) {
+  const r = await fetch(url, opts);
+  if (!r.ok) throw new Error(url + ' ' + r.status);
+  return r.json();
+}
+
+/* Projection: simple equirectangular, good enough at district scale. */
+function toXY(lat, lon) {
+  const cx = (bounds.minLo + bounds.maxLo) / 2, cy = (bounds.minLa + bounds.maxLa) / 2;
+  const sx = Math.cos(cy * Math.PI / 180);
+  return [ (lon - cx) * sx, -(lat - cy) ];
+}
+
+function fit() {
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  const [x0,y0] = toXY(bounds.maxLa, bounds.minLo), [x1,y1] = toXY(bounds.minLa, bounds.maxLo);
+  const k = Math.min(w / (x1 - x0), h / (y1 - y0)) * 0.95;
+  view = { k, x: w/2 - ((x0+x1)/2) * k, y: h/2 - ((y0+y1)/2) * k };
+}
+
+function screen([x,y]) { return [x * view.k + view.x, y * view.k + view.y]; }
+
+function buildRoadPaths() {
+  // One path for ordinary roads, one per crossing status. Built once; redraws are cheap.
+  roadPath = new Path2D();
+  crossEdges = [];
+  const byStatus = {};
+  for (const e of G.edges) {
+    const a = G.nodeXY[e.u], b = G.nodeXY[e.v];
+    if (!a || !b) continue;
+    if (e.crossing_id) {
+      crossEdges.push(e);
+    } else {
+      roadPath.moveTo(a[0], a[1]); roadPath.lineTo(b[0], b[1]);
+    }
+  }
+  roadPath.__width = 1;
+}
+
+function draw() {
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width = w * devicePixelRatio; canvas.height = h * devicePixelRatio;
+  ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  ctx.save();
+  ctx.translate(view.x, view.y); ctx.scale(view.k, view.k);
+  // Water first, under the roads.
+  for (const f of (F ? F.features : [])) {
+    ctx.beginPath();
+    f.coords.forEach(([la, lo], i) => { const [x,y] = toXY(la, lo); i ? ctx.lineTo(x,y) : ctx.moveTo(x,y); });
+    ctx.strokeStyle = WATER[f.kind] || '#4a90c2';
+    ctx.lineWidth = (f.kind === 'river' ? 3 : 1.5) / view.k;
+    ctx.stroke();
+  }
+  // Ordinary roads.
+  ctx.strokeStyle = '#8a929c';
+  ctx.lineWidth = 1 / view.k;
+  ctx.stroke(roadPath);
+  // Crossings, coloured by status.
+  for (const e of crossEdges) {
+    const a = G.nodeXY[e.u], b = G.nodeXY[e.v];
+    const st = (ST[e.crossing_id] || {}).status || 'UNKNOWN';
+    ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]);
+    ctx.strokeStyle = COLORS[st] || COLORS.UNKNOWN;
+    ctx.lineWidth = (selected === e.crossing_id ? 7 : 4) / view.k;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+  }
+  // Settlements and facilities.
+  for (const n of G.nodes) {
+    if (n.kind === 'junction') continue;
+    const [x,y] = G.nodeXY[n.node_id];
+    if (n.kind === 'facility') {
+      ctx.fillStyle = '#14171c'; ctx.fillRect(x - 5/view.k, y - 5/view.k, 10/view.k, 10/view.k);
+    } else {
+      ctx.beginPath(); ctx.arc(x, y, 4/view.k, 0, Math.PI*2);
+      ctx.fillStyle = '#fff'; ctx.fill(); ctx.lineWidth = 1.5/view.k; ctx.strokeStyle = '#14171c'; ctx.stroke();
+    }
+  }
+  ctx.restore();
+  // Labels for settlements and facilities at a useful zoom.
+  if (view.k > 900) {
+    ctx.font = '11px system-ui'; ctx.fillStyle = '#14171c';
+    for (const n of G.nodes) {
+      if (n.kind === 'junction' || !n.name) continue;
+      const [sx, sy] = screen(G.nodeXY[n.node_id]);
+      ctx.fillText(n.name, sx + 6, sy - 6);
+    }
+  }
+}
+
+function nearestCrossing(px, py) {
+  let best = null, bd = 14 * 14;
+  for (const e of crossEdges) {
+    const a = screen(G.nodeXY[e.u]), b = screen(G.nodeXY[e.v]);
+    const mx = (a[0]+b[0])/2, my = (a[1]+b[1])/2;
+    const d = (mx-px)**2 + (my-py)**2;
+    if (d < bd) { bd = d; best = e.crossing_id; }
+  }
+  return best;
+}
+
+canvas.addEventListener('wheel', (ev) => {
+  ev.preventDefault();
+  const r = canvas.getBoundingClientRect(), px = ev.clientX - r.left, py = ev.clientY - r.top;
+  const f = ev.deltaY < 0 ? 1.2 : 1/1.2;
+  view.x = px - (px - view.x) * f; view.y = py - (py - view.y) * f; view.k *= f;
+  draw();
+}, { passive: false });
+
+let drag = null, moved = false;
+canvas.addEventListener('pointerdown', (ev) => { drag = {x: ev.clientX, y: ev.clientY}; moved = false; canvas.setPointerCapture(ev.pointerId); });
+canvas.addEventListener('pointermove', (ev) => {
+  if (!drag) return;
+  const dx = ev.clientX - drag.x, dy = ev.clientY - drag.y;
+  if (Math.abs(dx) + Math.abs(dy) > 3) moved = true;
+  view.x += dx; view.y += dy; drag = {x: ev.clientX, y: ev.clientY}; draw();
+});
+canvas.addEventListener('pointerup', (ev) => {
+  const wasDrag = moved; drag = null;
+  if (wasDrag) return;
+  const r = canvas.getBoundingClientRect();
+  const id = nearestCrossing(ev.clientX - r.left, ev.clientY - r.top);
+  if (id) showDetail(id);
+});
+
+async function showDetail(id) {
+  selected = id;
+  const s = ST[id] || {status:'UNKNOWN'};
+  const insp = (await j('/v1/inspection-ranking')).find(r => r.crossing_id === id);
+  const dep = insp ? `${insp.settlements_cut_off_if_closed} settlement(s) depend on this crossing (structural).` : 'No settlement depends on this crossing alone.';
+  $('detail').innerHTML = `<b>${esc(id)}</b> · <span class="badge" style="color:${COLORS[s.status]}">${esc(s.status)}</span>` +
+    (s.conflict_with_reports ? ' · <b>conflicting reports</b>' : '') + `<br>${dep} OSM tag, not an inspection.`;
+  draw();
+}
+
+function bboxOf(nodes) {
+  let minLa=90,maxLa=-90,minLo=180,maxLo=-180;
+  for (const n of nodes) { minLa=Math.min(minLa,n.lat); maxLa=Math.max(maxLa,n.lat); minLo=Math.min(minLo,n.lon); maxLo=Math.max(maxLo,n.lon); }
+  return {minLa,maxLa,minLo,maxLo};
+}
+
+async function refreshStatus(scenario) {
+  const q = scenario ? '?scenario=' + encodeURIComponent(scenario) : '';
+  ST = await j('/v1/status' + q);
+}
+
+async function refreshPanels(scenario) {
+  const q = scenario ? '?scenario=' + encodeURIComponent(scenario) : '';
+  const [iso, insp] = await Promise.all([j('/v1/isolated-settlements' + q), j('/v1/inspection-ranking' + q)]);
+  $('iso').innerHTML = iso.length
+    ? '<ul>' + iso.slice(0, 40).map(s => `<li><b>${esc(s.name)}</b> (${esc(s.settlement_id)}), population estimate ${esc(s.population_estimate ?? 'unknown')}</li>`).join('') + '</ul>' + (iso.length > 40 ? `<p class="muted">… and ${iso.length-40} more</p>` : '')
+    : 'No settlement is isolated under this policy.';
+  $('insp').innerHTML = insp.slice(0, 60).map(r => `<tr><td>${esc(r.crossing_id)}</td><td><span class="badge" style="color:${COLORS[r.status]}">${esc(r.status)}</span></td><td>${r.settlements_cut_off_if_closed}</td></tr>`).join('')
+    || '<tr><td colspan="3">No unverified crossings.</td></tr>';
+}
+
+async function init() {
+  try {
+    const h = await j('/v1/health');
+    $('hstat').textContent = `pack ${h.pack_version} · offline · graph ${h.graph_version}`;
+    $('gver').textContent = `Pack created ${h.pack_created_at}. ${h.source_class_note}`;
+    G = await j('/v1/assets');
+    const names = G.nodes.filter(n => n.kind !== 'junction' && n.name);
+    const opts = names.map(n => `<option value="${esc(n.node_id)}">${esc(n.name)}</option>`).join('');
+    $('origin').innerHTML = opts; $('dest').innerHTML = opts;
+    const hosp = names.find(n => n.kind === 'facility' && /hospital/i.test(n.name)) || names.find(n => n.kind === 'facility'), first = names.find(n => n.kind === 'settlement');
+    if (first) $('origin').value = first.node_id;
+    if (hosp) $('dest').value = hosp.node_id;
+    bounds = bboxOf(G.nodes);
+    G.nodeXY = {};
+    for (const n of G.nodes) G.nodeXY[n.node_id] = toXY(n.lat, n.lon);
+    try { F = await j('/v1/features'); } catch (e) { F = {features: []}; }
+    buildRoadPaths();
+    $('legend').innerHTML = Object.keys(COLORS).map(k => `<span><i class="dot" style="background:${COLORS[k]}"></i>${k}</span>`).join('');
+    fit();
+    await refreshStatus(''); draw(); await refreshPanels('');
+    window.addEventListener('resize', () => { fit(); draw(); });
+  } catch (err) {
+    $('hstat').textContent = 'hub unreachable: ' + err.message;
+  }
+}
+
+$('go').onclick = async () => {
+  const scenario = $('scenario').value.trim();
+  const body = { origin: $('origin').value, destination: $('dest').value, vehicle: $('vehicle').value,
+                 policy: $('policy').value, scenario_at_risk: scenario ? scenario.split(',').map(s => s.trim()) : [] };
+  const r = await j('/v1/routes/compute', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  $('routeOut').textContent = JSON.stringify(r, null, 2);
+  await refreshStatus(scenario); draw(); await refreshPanels(scenario);
+};
+
+init();
+</script>
+</body>
+</html>

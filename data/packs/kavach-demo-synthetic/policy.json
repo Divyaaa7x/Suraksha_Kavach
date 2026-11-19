@@ -1,0 +1,10 @@
+{
+  "default_policy": "strict",
+  "freshness_days_verified": 30,
+  "note": "Human approval required for every access decision. Synthetic demo policy.",
+  "vehicle_classes": [
+    "light",
+    "medium",
+    "heavy"
+  ]
+}

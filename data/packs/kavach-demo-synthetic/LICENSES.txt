@@ -1,0 +1,3 @@
+SYNTHETIC DEMO PACK. All geometry, names and populations are invented for testing.
+Real pilot packs must add OpenStreetMap attribution (c) OpenStreetMap contributors, ODbL,
+built from a permitted Geofabrik extract (not bulk tile downloads).

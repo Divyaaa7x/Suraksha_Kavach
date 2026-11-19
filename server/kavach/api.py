@@ -1,0 +1,102 @@
+"""Local command hub: FastAPI app serving the offline dashboard and /v1 API. No outbound calls."""
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+
+from fastapi import FastAPI, Query
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
+
+from .service import Hub
+
+ROOT = Path(__file__).resolve().parents[2]
+# Default is the REAL OpenStreetMap pack (ODbL). Set KAVACH_PACK_DIR to use another pack.
+PACK_DIR = Path(os.environ.get("KAVACH_PACK_DIR", ROOT / "data" / "packs" / "kavach-osm-medak-kamareddy"))
+DB_PATH = Path(os.environ.get("KAVACH_DB", ROOT / "data" / "hub.sqlite3"))
+STATIC = ROOT / "server" / "static"
+
+
+class RouteRequest(BaseModel):
+    origin: str = Field(max_length=32)
+    destination: str = Field(max_length=32)
+    vehicle: str = Field(default="light", max_length=16)
+    policy: str = Field(default="strict", pattern="^(strict|unverified_warning)$")
+    scenario_at_risk: list[str] = Field(default_factory=list, max_length=50)
+
+
+def create_app(pack_dir: Path = PACK_DIR, db_path: Path = DB_PATH) -> FastAPI:
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    hub = Hub(db_path, pack_dir)
+    app = FastAPI(title="SURAKSHA KAVACH local hub", version="0.2.0-prototype")
+    app.state.hub = hub
+    app.add_middleware(GZipMiddleware, minimum_size=1024)
+
+    @app.get("/v1/health")
+    def health():
+        return hub.health()
+
+    @app.get("/v1/assets")
+    def assets():
+        g = hub.graph
+        return {
+            "source_class": g.source_class,
+            "crossings": [{"crossing_id": c.crossing_id, "kind": c.kind, "restrict_to": sorted(c.restrict_to)}
+                          for c in g.crossings.values()],
+            "nodes": [n.__dict__ for n in g.nodes.values()],
+            "edges": [e.__dict__ for e in g.edges.values()],
+        }
+
+    @app.get("/v1/features")
+    def features():
+        return JSONResponse(json.loads((hub.pack_dir / "features.json").read_text(encoding="utf-8")))
+
+    @app.get("/v1/status")
+    def status(scenario: str = Query(default="", max_length=500)):
+        at_risk = [s for s in scenario.split(",") if s]
+        return hub.statuses(at_risk)
+
+    @app.post("/v1/events", status_code=200)
+    def events(payload: dict):
+        return hub.submit(payload)
+
+    @app.post("/v1/approvals", status_code=200)
+    def approvals(payload: dict):
+        return hub.submit(payload)
+
+    @app.get("/v1/events")
+    def list_events(kind: str | None = Query(default=None, pattern="^(OBSERVATION|APPROVAL)$")):
+        return hub.events(kind)
+
+    @app.post("/v1/routes/compute")
+    def compute(req: RouteRequest):
+        return hub.route(req.origin, req.destination, req.vehicle, req.policy, req.scenario_at_risk)
+
+    @app.get("/v1/isolated-settlements")
+    def isolated(vehicle: str = "light", policy: str = Query(default="strict", pattern="^(strict|unverified_warning)$"),
+                 scenario: str = Query(default="", max_length=500)):
+        return hub.isolated(vehicle, policy, [s for s in scenario.split(",") if s])
+
+    @app.get("/v1/inspection-ranking")
+    def inspection(scenario: str = Query(default="", max_length=500)):
+        return hub.inspection([s for s in scenario.split(",") if s])
+
+    @app.get("/v1/sync/inventory")
+    def inventory():
+        return {"event_ids": hub.inventory(), "pack_version": hub.pack_version}
+
+    @app.post("/v1/sync/batch")
+    def batch(payload: list[dict]):
+        return hub.sync_batch(payload)
+
+    if STATIC.exists():
+        app.mount("/static", StaticFiles(directory=STATIC), name="static")
+
+        @app.get("/")
+        def index():
+            return FileResponse(STATIC / "index.html")
+
+    return app

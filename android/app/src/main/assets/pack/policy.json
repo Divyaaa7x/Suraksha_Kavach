@@ -1,0 +1,39 @@
+{
+  "assumptions": [
+    "Road geometry and tags are OpenStreetMap data; they are not a survey and may be incomplete.",
+    "Every bridge, culvert and ford starts as UNKNOWN. Passability is never inferred from a tag.",
+    "Places and health facilities are linked to the nearest road node within 1500 m by a straight access spur. The spur is an assumption, not a mapped road.",
+    "Speeds are class defaults for travel-time comparison only. They are not measured.",
+    "Settlement populations come from OSM 'population' tags where present, else are unknown. They are estimates.",
+    "The extract is clipped to a bounding box; roads that leave the box may look cut off."
+  ],
+  "counts": {
+    "access_spurs": 605,
+    "crossings_from_osm_tags": 96,
+    "facilities": 132,
+    "features": 52,
+    "road_edges": 67452,
+    "settlements": 473
+  },
+  "default_policy": "strict",
+  "freshness_days_verified": 30,
+  "note": "Human approval required for every access decision. Real map data; status data is not real yet.",
+  "unlinked_places": [
+    "settlement:Byathole",
+    "settlement:Chowtlapally",
+    "settlement:Doulapur",
+    "settlement:Gandharpalle",
+    "settlement:Jayapuram",
+    "settlement:Khasimpur",
+    "settlement:Lingasanpalle",
+    "settlement:Nagapur",
+    "settlement:Sadasivnagar",
+    "settlement:Sulthanpur",
+    "settlement:Thimmaipalle"
+  ],
+  "vehicle_classes": [
+    "light",
+    "medium",
+    "heavy"
+  ]
+}
