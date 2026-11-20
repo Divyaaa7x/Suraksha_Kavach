@@ -16,13 +16,11 @@ ROOT = Path(__file__).resolve().parents[2]
 PACK = ROOT / "data" / "packs" / "kavach-demo-synthetic"
 
 
-@pytest.fixture(scope="module")
-def dashboard_url(tmp_path_factory):
+def _start_hub(tmp_path, token=None):
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
-    app = create_app(PACK, tmp_path_factory.mktemp("dashboard") / "hub.sqlite3",
-                     demo_approvals_enabled=True)
+    app = create_app(PACK, tmp_path / "hub.sqlite3", demo_approvals_enabled=True, hub_token=token)
     config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error")
     server = uvicorn.Server(config)
     thread = threading.Thread(target=server.run, daemon=True)
@@ -31,8 +29,14 @@ def dashboard_url(tmp_path_factory):
     while not server.started and time.monotonic() < deadline:
         time.sleep(0.05)
     assert server.started, "test hub failed to start"
+    return f"http://127.0.0.1:{port}", server, thread
+
+
+@pytest.fixture(scope="module")
+def dashboard_url(tmp_path_factory):
+    url, server, thread = _start_hub(tmp_path_factory.mktemp("dashboard"))
     try:
-        yield f"http://127.0.0.1:{port}"
+        yield url
     finally:
         server.should_exit = True
         thread.join(timeout=5)
@@ -76,3 +80,30 @@ def test_dashboard_loads_and_computes_warned_route_on_mobile_viewport(dashboard_
         assert not overflow, f"mobile horizontal overflow: {overflow}"
         assert not errors, f"browser errors: {errors}"
         browser.close()
+
+
+def test_dashboard_token_entry_unlocks_authenticated_api(tmp_path):
+    token = "test-hub-token-12345678901234567890abc"
+    url, server, thread = _start_hub(tmp_path, token)
+    try:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch()
+            page = browser.new_page()
+            asset_statuses = []
+            page.on("response", lambda response: asset_statuses.append(response.status)
+                    if response.url.endswith("/v1/assets") else None)
+            page.goto(url, wait_until="networkidle")
+            assert "hub unreachable:" in page.locator("#hstat").inner_text()
+
+            page.locator("details").first.locator("summary").click()
+            page.locator("#hubToken").fill(token)
+            page.locator("#saveHubToken").click()
+            page.wait_for_function("document.querySelector('#hstat').textContent.startsWith('pack DEMO-SYN-001')")
+            page.wait_for_function("document.querySelectorAll('#origin option').length === 4")
+
+            assert 401 in asset_statuses and 200 in asset_statuses
+            assert page.locator("#origin option").count() == 4
+            browser.close()
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
