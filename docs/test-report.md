@@ -19,6 +19,7 @@ Updated 20 November 2026. This report contains observed results only; unrun hard
 - Pixel 8a route-enabled APK installed. The app extracted the signed **590,577,664-byte** route DB and then returned offline place suggestions for Kamareddy and Nizamabad. Warning mode produced a **754-segment** candidate estimated at 3,099 s. The captured process PSS was **222,296 KiB** after route calculation; the strict-mode `SEARCH_LIMIT` state appeared by the 20-second capture and showed no route. PSS at that capture was **238,597 KiB**. Frame spot check: 195 frames, 7 janky (3.59%), p50 7 ms, p90 10 ms, p99 150 ms. No fatal exception or ANR appeared in the checked log window.
 - This confirms the opt-in demo data path on the Pixel 8a; it does not make the source repository contain the route database or create a production-signed build. A standard checkout continues to use pilot-only routes. The 2 GB PSS target is exceeded during route calculation, and a long strict search can return `SEARCH_LIMIT`; both remain release blockers.
 - GitHub Actions run [44733785873](https://github.com/Divyaaa7x/Suraksha_Kavach/actions/runs/44733785873) completed successfully for the packaging code (Python, dashboard browser, Android).
+- GitHub Actions run [44734586347](https://github.com/Divyaaa7x/Suraksha_Kavach/actions/runs/44734586347) completed successfully for commit `683092c` (Python, dashboard browser E2E, Android unit tests/debug build and production-release fail-closed gate).
 
 ## Latest route compatibility and performance follow-up — 20 November 2026
 
