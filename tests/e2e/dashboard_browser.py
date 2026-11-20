@@ -61,6 +61,10 @@ def test_dashboard_loads_and_computes_warned_route_on_mobile_viewport(dashboard_
         assert page.locator("#placeStatus").inner_text() == "UNKNOWN"
         page.get_by_role("button", name="Close crossing details").click()
 
+        page.get_by_role("button", name="Compute route").click()
+        page.wait_for_function("document.querySelector('#routeOut').textContent.includes('Result: NO_VERIFIED_ROUTE')")
+        assert "Unverified segments excluded:" in page.locator("#routeOut").inner_text()
+
         page.locator("#policy").select_option("unverified_warning")
         page.get_by_role("button", name="Compute route").click()
         page.wait_for_function("document.querySelector('#routeOut').textContent.includes('Result: ROUTE_CANDIDATE')")
