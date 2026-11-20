@@ -2,6 +2,14 @@
 
 Updated 20 November 2026. This report contains observed results only; unrun hardware and platform checks stay pending.
 
+## Latest continuation verification — 20 November 2026
+
+- OSM routing rules: Python suite **61 passed**; Android `testDemoDebugUnitTest` **26 passed** and `testProductionDebugUnitTest` **24 passed, 3 demo-only tests skipped**; both demo and production debug APKs assembled. Dashboard browser E2E: **2 passed**.
+- Routing-pack update `7e2ef38` adds OSM vehicle access and one-way handling. The rebuilt signed pilot pack verifies and is byte-identical between hub and Android. The statewide map still has display coverage only; the route graph remains the Medak/Kamareddy pilot.
+- Pixel 8a (Android 17, 7.75 GB RAM) is reachable over wireless ADB. The demo APK installed and launched without a fatal exception in the checked logcat window. The device was at its secure lock screen, so visual interaction and route gestures were not checked. The production debug APK installed but failed closed during pack signature verification because this workstation has no production pack-signing public key configured; this is not a provisioned production release test.
+- A full Southern Zone PBF map build completed in about ten minutes and reported 854,785 contextual roads, 532,186 roads with Telangana nodes, 9,847 waterways and 33,596 places/facilities. Its SQLite output differed slightly from the already signed map archive (four spatial-cell rows and file hash), so the signed asset was left unchanged. This pass did not generate a statewide routing graph.
+- Remaining release gates: statewide offline routing and place search; production key/device enrollment and release signing; mandatory secure hub deployment and hosting; two-device Nearby field checks; Pixel interaction review and 2 GB device performance checks. Debug APK success is not production readiness.
+
 ## Current branch follow-up — 20 November 2026
 
 - Added optional `KAVACH_HUB_TOKEN` authentication for all `/v1/*` data routes except health, with bearer tokens sent by both the web dashboard and Android LAN sync. Dashboard token is held in the current browser tab; Android token stays in ViewModel memory and is masked in the Sync screen. A configured-token API regression test verifies missing/wrong tokens are rejected and a correct token is accepted.
