@@ -9,7 +9,7 @@ Scope: the prototype as built. Each row says what is implemented and what is sti
 | Replay / reused event_id | Append-only store; identical duplicates acknowledged; different content rejected | Implemented |
 | Unauthorised approval | Only the `supervisor` role may approve; enforced on both phone and hub | Implemented |
 | Tampered offline pack | Pinned pack-signer key, per-file SHA-256 manifest, downgrade check | Implemented (tested) |
-| Oversize payload | 4 KB limit before parsing; batch limit of 100 | Implemented |
+| Oversize payload | API request bodies are capped at 512 KiB before JSON parsing; each event is limited to 4 KiB and batches to 100 events | Implemented and covered by API/Android unit tests |
 | Conflicting claims | Reports never overwrite an approval; conflicts show DISPUTED | Implemented (tested) |
 | GPS spoofing | Fix age and accuracy shown; stale fix refused for a new report | Partial. Spoofing cannot be fully prevented. |
 | Malicious peer (Nearby) | Pairing code must be confirmed by a person; incoming payloads are size/item capped, events validated before storing, and ACKs are limited to IDs sent to that peer | Unit-tested; physical two-device exchange remains unverified |

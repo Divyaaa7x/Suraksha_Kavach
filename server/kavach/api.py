@@ -5,6 +5,7 @@ import json
 import os
 import tempfile
 import uuid
+from typing import Any, Awaitable, Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -24,6 +25,60 @@ ROOT = Path(__file__).resolve().parents[2]
 PACK_DIR = Path(os.environ.get("KAVACH_PACK_DIR", ROOT / "data" / "packs" / "kavach-osm-medak-kamareddy"))
 DB_PATH = Path(os.environ.get("KAVACH_DB", ROOT / "data" / "hub.sqlite3"))
 STATIC = ROOT / "server" / "static"
+MAX_API_BODY_BYTES = 512 * 1024
+
+
+class ApiBodyLimitMiddleware:
+    """Bound request memory before FastAPI decodes JSON bodies."""
+
+    def __init__(self, app: Callable[..., Awaitable[None]], max_bytes: int = MAX_API_BODY_BYTES):
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope: dict[str, Any], receive: Callable[..., Awaitable[dict[str, Any]]],
+                       send: Callable[..., Awaitable[None]]) -> None:
+        if scope["type"] != "http" or not scope.get("path", "").startswith("/v1/"):
+            await self.app(scope, receive, send)
+            return
+
+        headers = dict(scope.get("headers", []))
+        try:
+            declared_length = int(headers.get(b"content-length", b"0"))
+        except ValueError:
+            response = JSONResponse({"detail": "invalid content length"}, status_code=400)
+            await response(scope, receive, send)
+            return
+        if declared_length > self.max_bytes:
+            response = JSONResponse({"detail": "request body exceeds size limit"}, status_code=413)
+            await response(scope, receive, send)
+            return
+
+        body = bytearray()
+        while True:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                return
+            if message["type"] != "http.request":
+                continue
+            body.extend(message.get("body", b""))
+            if len(body) > self.max_bytes:
+                response = JSONResponse({"detail": "request body exceeds size limit"}, status_code=413)
+                await response(scope, receive, send)
+                return
+            if not message.get("more_body", False):
+                break
+
+        cached_body = bytes(body)
+        delivered = False
+
+        async def replay_body() -> dict[str, Any]:
+            nonlocal delivered
+            if delivered:
+                return {"type": "http.disconnect"}
+            delivered = True
+            return {"type": "http.request", "body": cached_body, "more_body": False}
+
+        await self.app(scope, replay_body, send)
 
 
 class RouteRequest(BaseModel):
@@ -53,6 +108,7 @@ def create_app(pack_dir: Path = PACK_DIR, db_path: Path = DB_PATH,
     map_cache = Path(os.environ.get("KAVACH_MAP_CACHE", Path(tempfile.gettempdir()) / "suraksha-kavach-map"))
     app.state.offline_map = OfflineMap(map_asset, map_meta, map_cache) if map_meta.is_file() and map_asset.is_file() else None
     app.add_middleware(GZipMiddleware, minimum_size=1024)
+    app.add_middleware(ApiBodyLimitMiddleware)
 
     @app.get("/v1/health")
     def health():

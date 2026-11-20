@@ -7,9 +7,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+import httpx
 from fastapi.testclient import TestClient
 
-from kavach.api import create_app
+from kavach.api import MAX_API_BODY_BYTES, create_app
 from kavach.pack import PackError, demo_signing_key, load_pack
 from kavach.signing import sign_body
 
@@ -48,6 +49,21 @@ def test_health_is_offline_and_labelled(client):
     assert h["pack_version"] == PV
     assert h["source_class"] == "SIMULATED"
     assert "no field verification" in h["source_class_note"]
+
+
+def test_api_rejects_oversized_declared_body_before_json_parsing(client):
+    response = client.post("/v1/events", content=b" " * (MAX_API_BODY_BYTES + 1))
+    assert response.status_code == 413
+
+
+def test_api_rejects_oversized_chunked_body_before_json_parsing(client):
+    class ChunkedBody(httpx.SyncByteStream):
+        def __iter__(self):
+            yield b" " * (MAX_API_BODY_BYTES // 2)
+            yield b" " * (MAX_API_BODY_BYTES // 2 + 1)
+
+    response = client.post("/v1/events", content=ChunkedBody())
+    assert response.status_code == 413
 
 
 def test_india_overview_api_has_reference_boundaries(client):
