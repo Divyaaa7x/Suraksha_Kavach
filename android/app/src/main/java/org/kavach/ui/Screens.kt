@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -249,6 +250,7 @@ private fun MapScreen(vm: KavachViewModel) {
     val crossingOptions = remember(graph) {
         graph.crossings.keys.sorted().map { id -> id to "$id · ${graph.crossings[id]?.kind ?: "crossing"}" }
     }
+    var focusLocation by remember { mutableStateOf<Pair<Double, Double>?>(null) }
     if (!vm.showLocalDetail) {
         Section("India · ${areas.size} states and union territories") {
             IndiaOverviewMap(areas, vm.selectedMapArea, onSelect = { vm.selectedMapArea = it })
@@ -260,13 +262,9 @@ private fun MapScreen(vm: KavachViewModel) {
                 else "Reference boundary only · no local road map installed",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (selectedArea?.code == "IN-TG") {
-                Button(onClick = { vm.showLocalDetail = true }, modifier = Modifier.padding(top = 10.dp)) {
-                    Text("Open Telangana map")
-                }
-            }
         }
-    } else {
+    }
+    if (vm.showLocalDetail) {
         Section("Telangana · offline map") {
             OutlinedButton(onClick = { vm.showLocalDetail = false }) { Text("India") }
             val mapDatabase = vm.offlineMapDatabase()
@@ -281,9 +279,57 @@ private fun MapScreen(vm: KavachViewModel) {
                     highlightedEdges = vm.highlightedRouteEdges,
                     onSelectCrossing = { vm.selectedCrossing = it },
                     mapHeight = mapHeight,
+                    focusLocation = focusLocation,
                 )
                 NodePicker("Pilot crossing", crossingOptions, vm.selectedCrossing.orEmpty()) {
                     vm.selectedCrossing = it
+                }
+                var query by remember { mutableStateOf("") }
+                val searchPlaces = remember(graph) {
+                    graph.nodes.values.filter { it.kind != "junction" }
+                        .sortedBy { it.name.ifBlank { it.id } }
+                }
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    label = { Text("Search crossings and places") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                )
+                val searchCrossings = remember(query, graph) {
+                    if (query.isBlank()) emptyList() else graph.crossings.values.filter {
+                        it.id.contains(query, true) || it.kind.contains(query, true)
+                    }.take(8).map { it.id to "${it.id} · ${it.kind}" }
+                }
+                val searchResults = remember(query, graph) {
+                    if (query.isBlank()) emptyList() else {
+                        searchPlaces.filter { it.name.contains(query, true) || it.id.contains(query, true) }.take(8)
+                    }
+                }
+                if (searchResults.isNotEmpty() || searchCrossings.isNotEmpty()) {
+                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 220.dp)) {
+                        items(searchCrossings, key = { it.first }) { (id, label) ->
+                            Text(label, Modifier.fillMaxWidth().clickable {
+                                vm.selectedCrossing = id
+                                val edge = graph.edges.values.firstOrNull { it.crossingId == id }
+                                val a = edge?.let { graph.nodes[it.u] }; val b = edge?.let { graph.nodes[it.v] }
+                                if (a != null && b != null) focusLocation = (a.lat + b.lat) / 2 to (a.lon + b.lon) / 2
+                                query = label
+                            }
+                                .padding(vertical = 10.dp, horizontal = 8.dp))
+                        }
+                        items(searchResults, key = { it.id }) { node ->
+                            Text(
+                                "${node.name.ifBlank { node.id }} · ${node.kind}",
+                                Modifier.fillMaxWidth().clickable {
+                                    query = node.name.ifBlank { node.id }
+                                    val crossing = node.id.takeIf { it in graph.crossings }
+                                    if (crossing != null) vm.selectedCrossing = crossing
+                                    focusLocation = node.lat to node.lon
+                                }.padding(vertical = 10.dp, horizontal = 8.dp),
+                            )
+                        }
+                    }
                 }
                 Text("Pinch to zoom · drag to explore · OSM map",
                     style = MaterialTheme.typography.labelSmall,
@@ -313,7 +359,8 @@ private fun MapScreen(vm: KavachViewModel) {
     if (vm.showLocalDetail && sel != null) {
         val st = vm.statuses[sel]
         val dep = vm.inspection.firstOrNull { it.crossingId == sel }
-        Section("Crossing $sel") {
+        Section("Selected crossing · $sel") {
+            OutlinedButton(onClick = { vm.selectedCrossing = null }) { Text("Clear selection") }
             Text("Kind: ${graph.crossings[sel]?.kind ?: "unknown"} (from the OpenStreetMap tag, not an inspection)")
             Text("Status: ${st?.status ?: "UNKNOWN"}", color = statusColor(st?.status ?: Status.UNKNOWN),
                 fontWeight = FontWeight.SemiBold)

@@ -162,6 +162,7 @@ fun TelanganaOfflineMap(
     highlightedEdges: Set<String>,
     onSelectCrossing: (String?) -> Unit,
     mapHeight: androidx.compose.ui.unit.Dp = 500.dp,
+    focusLocation: Pair<Double, Double>? = null,
 ) {
     val store = remember(database) { TelanganaMapStore(database) }
     DisposableEffect(store) { onDispose { store.close() } }
@@ -203,6 +204,7 @@ fun TelanganaOfflineMap(
     val density = LocalDensity.current
     val currentScale by rememberUpdatedState(scale)
     val currentOffset by rememberUpdatedState(offset)
+    val searchPoint by rememberUpdatedState(selectedCrossing?.let { id -> crossings.firstOrNull { it.first == id }?.second })
     val stateWidth = xValues.max() - xValues.min()
     val stateHeight = yValues.max() - yValues.min()
 
@@ -227,6 +229,14 @@ fun TelanganaOfflineMap(
         scale = (minOf(size.width / routeWidth, size.height / routeHeight) * .72f).coerceAtMost(18000f)
         offset = Offset(size.width / 2f - (minX + maxX) / 2f * scale,
             size.height / 2f - (minY + maxY) / 2f * scale)
+    }
+    LaunchedEffect(focusLocation, size) {
+        val target = focusLocation ?: return@LaunchedEffect
+        if (size.width == 0 || size.height == 0) return@LaunchedEffect
+        val fit = minOf(size.width / stateWidth.toFloat(), size.height / stateHeight.toFloat()) * .90f
+        scale = maxOf(scale, fit * 8f).coerceAtMost(18000f)
+        val x = (target.second * lonScale).toFloat(); val y = -target.first.toFloat()
+        offset = Offset(size.width / 2f - x * scale, size.height / 2f - y * scale)
     }
     LaunchedEffect(size, scale, offset, routeWays) {
         if (scale <= 0f || size.width == 0 || size.height == 0) return@LaunchedEffect
@@ -393,6 +403,12 @@ fun TelanganaOfflineMap(
                         drawCircle(color, if (id == selectedCrossing) 6f else 4f, screen)
                         drawCircle(Color.White, 1.2f, screen)
                     }
+                }
+                searchPoint?.let { crossing ->
+                    val point = Offset((crossing.lon * lonScale).toFloat() * scale + offset.x, -crossing.lat.toFloat() * scale + offset.y)
+                    drawCircle(Color.White, 10f, point)
+                    drawCircle(Color(0xFF087E68), 7f, point)
+                    drawCircle(Color.White, 3f, point)
                 }
             }
         }

@@ -57,7 +57,7 @@ class KavachViewModel(application: Application) : AndroidViewModel(application) 
         private set
     var highlightedRouteEdges by mutableStateOf<Set<String>>(emptySet())
         private set
-    var showLocalDetail by mutableStateOf(false)
+    var showLocalDetail by mutableStateOf(true)
     var isolated by mutableStateOf<List<Isolated>>(emptyList())
         private set
     var inspection by mutableStateOf<List<InspectionRow>>(emptyList())
