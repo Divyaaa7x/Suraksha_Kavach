@@ -15,6 +15,8 @@ def test_osm_access_precedence_filters_vehicle_classes():
     assert BUILDER.allowed_vehicles({"access": "no", "motorcar": "yes"}) == ["light"]
     assert BUILDER.allowed_vehicles({"access": "no", "hgv": "yes"}) == ["medium", "heavy"]
     assert BUILDER.allowed_vehicles({"motor_vehicle": "private", "motorcar": "yes"}) == ["light"]
+    assert BUILDER.allowed_vehicles({"access": "destination"}) == []
+    assert BUILDER.allowed_vehicles({"access": "delivery"}) == []
     assert BUILDER.allowed_vehicles({}) is None
 
 
@@ -23,3 +25,5 @@ def test_osm_oneway_direction_handles_reverse_roundabouts_and_overrides():
     assert BUILDER.oneway_direction({"junction": "roundabout"}) == 1
     assert BUILDER.oneway_direction({"junction": "roundabout", "oneway": "no"}) == 0
     assert BUILDER.oneway_direction({"oneway": "yes", "oneway:motor_vehicle": "no"}) == 0
+    assert BUILDER.oneway_direction({"oneway": "reversible"}) is None
+    assert BUILDER.oneway_direction({"oneway:conditional": "no @ (Mo-Fr 08:00-10:00)"}) is None

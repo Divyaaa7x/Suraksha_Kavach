@@ -53,8 +53,10 @@ CROSSING_TAGS = ("bridge", "culvert", "ford")
 VEHICLE_CLASSES = ("light", "medium", "heavy")
 
 
-def oneway_direction(tags: dict) -> int:
-    """Return 1 for forward, -1 for reverse, 0 for bidirectional OSM motor access."""
+def oneway_direction(tags: dict) -> int | None:
+    """Return direction, or None when a time-dependent/unknown direction is unsafe to route."""
+    if "oneway:conditional" in tags or "oneway:motor_vehicle:conditional" in tags:
+        return None
     value = tags.get("oneway:motor_vehicle", tags.get("oneway"))
     if value in ("-1",):
         return -1
@@ -62,12 +64,14 @@ def oneway_direction(tags: dict) -> int:
         return 1
     if value in ("no", "false", "0"):
         return 0
+    if value is not None:
+        return None
     return 1 if tags.get("junction") in ("roundabout", "circular") else 0
 
 
 def allowed_vehicles(tags: dict) -> list[str] | None:
     """Return None when unrestricted; otherwise list allowed classes (possibly empty)."""
-    denied = {"no", "private", "agricultural", "forestry"}
+    denied = {"no", "private", "agricultural", "forestry", "destination", "delivery", "customers", "permit"}
     permitted = []
     for vehicle in VEHICLE_CLASSES:
         specific = "motorcar" if vehicle == "light" else "hgv"
@@ -160,6 +164,8 @@ def main() -> None:
             continue
         refs = [f"n{i}" for i in w["nodes"]]
         direction = oneway_direction(tags)
+        if direction is None:
+            continue
         permitted = allowed_vehicles(tags)
         if permitted == []:
             continue
