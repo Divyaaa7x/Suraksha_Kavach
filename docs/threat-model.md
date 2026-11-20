@@ -12,7 +12,7 @@ Scope: the prototype as built. Each row says what is implemented and what is sti
 | Oversize payload | 4 KB limit before parsing; batch limit of 100 | Implemented |
 | Conflicting claims | Reports never overwrite an approval; conflicts show DISPUTED | Implemented (tested) |
 | GPS spoofing | Fix age and accuracy shown; stale fix refused for a new report | Partial. Spoofing cannot be fully prevented. |
-| Malicious peer (Nearby) | Pairing code must be confirmed by a person; events validated before storing | Implemented, untested on two devices |
+| Malicious peer (Nearby) | Pairing code must be confirmed by a person; incoming payloads are size/item capped, events validated before storing, and ACKs are limited to IDs sent to that peer | Unit-tested; physical two-device exchange remains unverified |
 | Private key on device | Demo variant uses an intentionally public synthetic key; production event signing fails closed | **Open.** Provision an Android Keystore-compatible signing algorithm, device enrollment, key rotation/revocation, and hub trust distribution before operational use. |
 | Production pack trust | Production release build pins an externally supplied Ed25519 public key; release build is blocked without that key and a release keystore | Partial. Organization must provision and protect the matching pack-signing private key. |
 | Hub API abuse | Local-only demo, no authentication | **Open.** Add auth and TLS before any LAN outside a lab. |

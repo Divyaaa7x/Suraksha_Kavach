@@ -15,6 +15,7 @@ import com.google.android.gms.nearby.connection.Payload
 import com.google.android.gms.nearby.connection.PayloadCallback
 import com.google.android.gms.nearby.connection.PayloadTransferUpdate
 import com.google.android.gms.nearby.connection.Strategy
+import com.google.android.gms.tasks.Tasks
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -24,6 +25,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import org.kavach.core.Json
 import org.kavach.service.KavachNode
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 
 /**
  * Phone-to-phone exchange over Nearby Connections (dossier sections 13 and 38).
@@ -52,6 +55,7 @@ class NearbyRelay(
     val log: StateFlow<String> = _log.asStateFlow()
 
     private val pendingAccept = HashMap<String, String>() // endpointId -> code shown for confirmation
+    private val sentByEndpoint = ConcurrentHashMap<String, MutableSet<String>>()
     @Volatile private var started = false
 
     private fun setPeer(p: Peer) {
@@ -77,12 +81,14 @@ class NearbyRelay(
                 scope.launch { sendPending(endpointId) }
             } else {
                 _log.value = "Connection not established (${result.status.statusCode})"
+                sentByEndpoint.remove(endpointId)
                 removePeer(endpointId)
             }
             pendingAccept.remove(endpointId)
         }
 
         override fun onDisconnected(endpointId: String) {
+            sentByEndpoint.remove(endpointId)
             removePeer(endpointId)
             _log.value = "Peer disconnected"
         }
@@ -91,22 +97,26 @@ class NearbyRelay(
     private val payloads = object : PayloadCallback() {
         override fun onPayloadReceived(endpointId: String, payload: Payload) {
             val bytes = payload.asBytes() ?: return
+            if (bytes.size > NearbyPayloads.MAX_BYTES) {
+                _log.value = "Nearby transfer rejected: payload exceeds size limit"
+                return
+            }
             scope.launch {
                 try {
                     val text = String(bytes, Charsets.UTF_8)
                     if (text.startsWith(ACK_PREFIX)) {
                         // Peer confirms it stored these events, so they are no longer pending here.
-                        val ids = (Json.parse(text.removePrefix(ACK_PREFIX)) as List<*>).map { it as String }
+                        val sent = sentByEndpoint[endpointId] ?: ConcurrentHashMap.newKeySet<String>()
+                        val ids = NearbyPayloads.acknowledgedEvents(bytes, ACK_PREFIX, sent)
                         node.markSynced(ids)
+                        sent.removeAll(ids.toSet())
                         _log.value = "Peer stored ${ids.size} events"
                         return@launch
                     }
-                    val list = Json.parse(text) as List<*>
+                    val list = NearbyPayloads.decodeEvents(bytes)
                     val storedIds = ArrayList<String>()
                     for (item in list) {
-                        @Suppress("UNCHECKED_CAST")
-                        val raw = item as Map<String, Any?>
-                        val res = node.submit(raw, receivedAt = raw["received_at"] as? String)
+                        val res = node.submit(item, receivedAt = item["received_at"] as? String)
                         if (res.status == "accepted" || res.status == "duplicate") storedIds.add(res.eventId!!)
                     }
                     // Only after the local write succeeds do we acknowledge, so the sender keeps anything unconfirmed.
@@ -162,6 +172,7 @@ class NearbyRelay(
 
     fun rejectPeer(endpointId: String) {
         client.rejectConnection(endpointId)
+        sentByEndpoint.remove(endpointId)
         removePeer(endpointId)
     }
 
@@ -173,11 +184,20 @@ class NearbyRelay(
         }
         // Not marked synced here: the peer's ACK does that (see onPayloadReceived).
         val batches = NearbyPayloads.eventBatches(wire)
-        batches.forEachIndexed { index, bytes ->
-            client.sendPayload(endpointId, Payload.fromBytes(bytes))
-                .addOnFailureListener { _log.value = "Nearby batch ${index + 1} failed: ${it.message}" }
-        }
+        val sent = sentByEndpoint.computeIfAbsent(endpointId) { ConcurrentHashMap.newKeySet() }
         _log.value = "Sending ${wire.size} events in ${batches.size} Nearby batch(es)"
+        batches.forEachIndexed { index, bytes ->
+            val batchIds = NearbyPayloads.decodeEvents(bytes).map {
+                it["event_id"] as? String ?: throw IllegalArgumentException("Nearby event is missing event_id")
+            }
+            sent.addAll(batchIds)
+            try {
+                Tasks.await(client.sendPayload(endpointId, Payload.fromBytes(bytes)), 15, TimeUnit.SECONDS)
+            } catch (e: Exception) {
+                sent.removeAll(batchIds.toSet())
+                _log.value = "Nearby batch ${index + 1} failed: ${e.message}"
+            }
+        }
     }
 
     fun stop() {
@@ -185,6 +205,7 @@ class NearbyRelay(
         client.stopAllEndpoints()
         client.stopAdvertising()
         client.stopDiscovery()
+        sentByEndpoint.clear()
         _peers.value = emptyList()
         _log.value = "stopped"
     }

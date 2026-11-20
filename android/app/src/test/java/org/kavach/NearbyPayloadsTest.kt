@@ -24,4 +24,43 @@ class NearbyPayloadsTest {
     fun refusesAnEventLargerThanOneNearbyPayload() {
         NearbyPayloads.eventBatches(listOf(mapOf("note" to "x".repeat(300))), maxBytes = 128)
     }
+
+    @Test
+    fun receivedEventsAreLimitedByByteAndItemCount() {
+        val tooLarge = ByteArray(NearbyPayloads.MAX_BYTES + 1)
+        try {
+            NearbyPayloads.decodeEvents(tooLarge)
+            throw AssertionError("oversized payload should be rejected before parsing")
+        } catch (e: IllegalArgumentException) {
+            assertTrue(e.message!!.contains("byte limit"))
+        }
+
+        val tooMany = Json.canonical((0..NearbyPayloads.MAX_EVENTS).map { mapOf("id" to it) })
+            .toByteArray(Charsets.UTF_8)
+        try {
+            NearbyPayloads.decodeEvents(tooMany)
+            throw AssertionError("too many events should be rejected")
+        } catch (e: IllegalArgumentException) {
+            assertTrue(e.message!!.contains("event limit"))
+        }
+    }
+
+    @Test
+    fun acknowledgementCannotMarkUnsentEventsAsSynced() {
+        val ack = "ACK:[\"sent\",\"unsent\"]".toByteArray(Charsets.UTF_8)
+        try {
+            NearbyPayloads.acknowledgedEvents(ack, "ACK:", setOf("sent"))
+            throw AssertionError("acknowledgement for an unsent event should be rejected")
+        } catch (e: IllegalArgumentException) {
+            assertTrue(e.message!!.contains("not sent"))
+        }
+    }
+
+    @Test
+    fun senderCapsBatchEventCountToReceiverLimit() {
+        val events = (0..NearbyPayloads.MAX_EVENTS).map { mapOf("event_id" to "event-$it") }
+        val batches = NearbyPayloads.eventBatches(events)
+        assertEquals(2, batches.size)
+        assertTrue(batches.all { NearbyPayloads.decodeEvents(it).size <= NearbyPayloads.MAX_EVENTS })
+    }
 }
