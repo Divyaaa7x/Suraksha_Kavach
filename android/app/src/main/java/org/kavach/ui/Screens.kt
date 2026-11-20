@@ -171,10 +171,13 @@ private fun Section(title: String, content: @Composable () -> Unit) {
 
 @Composable
 private fun HomeScreen(vm: KavachViewModel, onGo: (Int) -> Unit) {
+    val packState by vm.packState.collectAsState()
+    val detailReady = (packState as? PackState.Ready)?.offlineMapDatabase != null
     val graph = vm.graph() ?: return
     val (packVersion, packCreated) = vm.packInfo()
     Section("Ready for the field") {
-        Text("Offline map available", color = MaterialTheme.colorScheme.primary,
+        Text(if (detailReady) "Offline map available" else "Pilot map ready · preparing detailed map",
+            color = MaterialTheme.colorScheme.primary,
             fontWeight = FontWeight.SemiBold)
         Text("Route graph · ${graph.edges.size} segments · ${graph.crossings.size} crossings")
         Text("Map updated ${ageText(packCreated)} ago")
@@ -243,6 +246,7 @@ private fun ageText(createdAt: String): String = try {
 
 @Composable
 private fun MapScreen(vm: KavachViewModel) {
+    val packState by vm.packState.collectAsState()
     val graph = vm.graph() ?: return
     val areas = vm.indiaAreas()
     val selectedArea = areas.firstOrNull { it.code == vm.selectedMapArea }
@@ -267,7 +271,8 @@ private fun MapScreen(vm: KavachViewModel) {
     if (vm.showLocalDetail) {
         Section("Telangana · offline map") {
             OutlinedButton(onClick = { vm.showLocalDetail = false }) { Text("India") }
-            val mapDatabase = vm.offlineMapDatabase()
+            val ready = packState as? PackState.Ready
+            val mapDatabase = ready?.offlineMapDatabase
             val telangana = areas.firstOrNull { it.code == "IN-TG" }
             if (mapDatabase != null && telangana != null) {
                 TelanganaOfflineMap(
@@ -339,6 +344,10 @@ private fun MapScreen(vm: KavachViewModel) {
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
+                Text(ready?.offlineMapError?.let { "Telangana detail map unavailable · pilot map shown" }
+                    ?: "Preparing Telangana detail map · pilot map available",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
                 RealMap(graph, vm.features(), vm.statuses, vm.selectedCrossing,
                     onSelect = { vm.selectedCrossing = it }, highlightedEdges = vm.highlightedRouteEdges,
                     mapHeight = mapHeight)

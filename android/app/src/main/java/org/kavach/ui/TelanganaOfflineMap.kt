@@ -205,6 +205,9 @@ fun TelanganaOfflineMap(
     val currentScale by rememberUpdatedState(scale)
     val currentOffset by rememberUpdatedState(offset)
     val searchPoint by rememberUpdatedState(selectedCrossing?.let { id -> crossings.firstOrNull { it.first == id }?.second })
+    val orderedPlaces = remember(snapshot.places) {
+        snapshot.places.sortedBy { when (it.kind) { "city" -> 0; "town" -> 1; "hospital" -> 2; "clinic", "doctors" -> 3; "village" -> 4; "road" -> 5; else -> 6 } }
+    }
     val stateWidth = xValues.max() - xValues.min()
     val stateHeight = yValues.max() - yValues.min()
 
@@ -368,9 +371,11 @@ fun TelanganaOfflineMap(
                     drawPath(snapshot.route, Color.White, style = Stroke(10f * strokeScale, cap = StrokeCap.Round))
                     drawPath(snapshot.route, Color(0xFF087E68), style = Stroke(6f * strokeScale, cap = StrokeCap.Round))
                 }
-                val occupied = ArrayList<Rect>()
+                val occupied = HashMap<Long, MutableList<Rect>>()
                 val textStyle = TextStyle(fontSize = 10.sp, color = Color(0xFF34443D))
-                snapshot.places.sortedBy { when (it.kind) { "city" -> 0; "town" -> 1; "hospital" -> 2; "clinic", "doctors" -> 3; "village" -> 4; "road" -> 5; else -> 6 } }.forEach { place ->
+                var labelsDrawn = 0
+                orderedPlaces.forEach { place ->
+                    if (labelsDrawn >= 140) return@forEach
                     if (place.name.isBlank()) return@forEach
                     if (routeWays.isNotEmpty() && place.kind !in setOf("city", "town", "hospital")) return@forEach
                     val labelZoom = when (place.kind) {
@@ -388,9 +393,17 @@ fun TelanganaOfflineMap(
                     val topLeft = Offset(if (isRoad) screen.x + 2f else screen.x + 5f,
                         screen.y - label.size.height / 2f)
                     val box = Rect(topLeft.x, topLeft.y, topLeft.x + label.size.width, topLeft.y + label.size.height)
-                    if (occupied.any { box.left < it.right + 6f && box.right + 6f > it.left &&
-                            box.top < it.bottom + 4f && box.bottom + 4f > it.top }) return@forEach
-                    occupied += box
+                    val leftCell = floor(box.left / 64f).toInt(); val rightCell = floor(box.right / 64f).toInt()
+                    val topCell = floor(box.top / 64f).toInt(); val bottomCell = floor(box.bottom / 64f).toInt()
+                    fun cellKey(x: Int, y: Int) = (x.toLong() shl 32) xor (y.toLong() and 0xffffffffL)
+                    for (x in leftCell..rightCell) for (y in topCell..bottomCell) {
+                        if (occupied[cellKey(x, y)].orEmpty().any { box.left < it.right + 6f && box.right + 6f > it.left &&
+                                box.top < it.bottom + 4f && box.bottom + 4f > it.top }) return@forEach
+                    }
+                    for (x in leftCell..rightCell) for (y in topCell..bottomCell) {
+                        occupied.getOrPut(cellKey(x, y)) { ArrayList() } += box
+                    }
+                    labelsDrawn++
                     if (!isRoad) drawCircle(if (medical) Color(0xFFC4655C) else Color(0xFF486B5C),
                         radius = if (place.kind == "city" || place.kind == "town") 3.2f else 2.2f, center = screen)
                     drawText(label, topLeft = topLeft)

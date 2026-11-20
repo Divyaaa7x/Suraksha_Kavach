@@ -23,6 +23,9 @@ Updated 20 November 2026. This report contains observed results only; unrun hard
 
 ## Follow-up validation — 20 November 2026
 
+- Startup/render update: the Android app now publishes the verified core pack before decompressing and verifying the 131 MB map database in the background. Pixel 8a reached the ready screen while map verification continued; the detailed offline map appeared after verification. On a short map pan/zoom sample, `dumpsys gfxinfo` recorded 183 frames with 6 janky frames (3.28%; p50 6 ms, p90 9 ms, p99 200 ms). This is a device spot check, not a 2 GB performance guarantee.
+- Dashboard map now reuses cached `Path2D` geometry between redraws and avoids resetting the canvas backing store when its size is unchanged. A 20-draw browser check at a 687 × 358 CSS-pixel map measured median 0.1 ms and maximum 0.3 ms per `draw()` call; this is a static headless-browser sample, not a full interaction benchmark.
+- The updated Android build passed `testDebugUnitTest assembleDebug`; Python suite passed (44 tests); dashboard inline JavaScript passed `node --check`. Pixel 8a displayed the detailed Telangana map and search; dashboard search opened the selected crossing card. No app crash or ANR appeared in the checked logcat window.
 - Fixed Android road-name generation so a named road contributes one midpoint label, regardless of how many geometry points it contains.
 - Added dashboard map zoom and fit controls, keyboard pan/zoom/reset, and a keyboard-accessible pilot-crossing selector with status details.
 - Python suite: 44 passed. Android `testDebugUnitTest assembleDebug`: build successful with the project toolchain (Gradle 8.11.1, JDK 21, SDK 34). Dashboard inline JavaScript passed `node --check`.

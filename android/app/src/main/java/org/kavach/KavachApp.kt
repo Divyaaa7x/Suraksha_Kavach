@@ -23,7 +23,7 @@ import java.util.zip.GZIPInputStream
 /** Pack loading state. The real pack is ~16 MB, so it is verified on a background thread. */
 sealed interface PackState {
     data object Loading : PackState
-    data class Ready(val pack: Pack, val node: KavachNode, val sync: LanSync, val offlineMapDatabase: File?) : PackState
+    data class Ready(val pack: Pack, val node: KavachNode, val sync: LanSync, val offlineMapDatabase: File?, val offlineMapError: String? = null) : PackState
     data class Failed(val message: String) : PackState
 }
 
@@ -43,14 +43,23 @@ class KavachApp : Application() {
         super.onCreate()
         db = Room.databaseBuilder(this, KavachDb::class.java, "kavach.db").build()
         Thread({
-            _state.value = try {
+            try {
                 val pack = PackLoader.load({ name -> assets.open("pack/$name").use { it.readBytes() } })
-                val offlineMap = pack.offlineMap?.let { installOfflineMap(it.archiveSha256, it.databaseSha256, it.databaseBytes) }
                 val node = KavachNode(pack, db.events())
-                PackState.Ready(pack, node, LanSync(node), offlineMap)
+                val ready = PackState.Ready(pack, node, LanSync(node), null)
+                _state.value = ready
+                pack.offlineMap?.let { metadata ->
+                    try {
+                        val offlineMap = installOfflineMap(metadata.archiveSha256, metadata.databaseSha256, metadata.databaseBytes)
+                        _state.value = ready.copy(offlineMapDatabase = offlineMap)
+                    } catch (e: Exception) {
+                        Log.e("KavachApp", "Offline Telangana map initialization failed", e)
+                        _state.value = ready.copy(offlineMapError = e.message ?: e.javaClass.simpleName)
+                    }
+                }
             } catch (e: Exception) {
-                Log.e("KavachApp", "Offline pack or map initialization failed", e)
-                PackState.Failed(e.message ?: e.javaClass.simpleName)
+                Log.e("KavachApp", "Offline pack initialization failed", e)
+                _state.value = PackState.Failed(e.message ?: e.javaClass.simpleName)
             }
         }, "pack-loader").start()
     }
