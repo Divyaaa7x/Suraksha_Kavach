@@ -202,7 +202,7 @@ function draw() {
   ctx.lineWidth = 1 / view.k;
   ctx.stroke(roadPath);
   // Crossings, coloured by status.
-  for (const e of crossEdges) {
+  for (const e of (view.k > 650 ? crossEdges : [])) {
     const a = G.nodeXY[e.u], b = G.nodeXY[e.v];
     const st = (ST[e.crossing_id] || {}).status || 'UNKNOWN';
     ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]);
@@ -212,7 +212,7 @@ function draw() {
     ctx.stroke();
   }
   // Settlements and facilities.
-  for (const n of G.nodes) {
+  for (const n of (view.k > 650 ? G.nodes : [])) {
     if (n.kind === 'junction') continue;
     const [x,y] = G.nodeXY[n.node_id];
     if (n.kind === 'facility') {
@@ -274,6 +274,7 @@ function setIndiaOverview(data) {
 }
 
 function nearestCrossing(px, py) {
+  if (view.k <= 650) return null;
   let best = null, bd = 14 * 14;
   for (const e of crossEdges) {
     const a = screen(G.nodeXY[e.u]), b = screen(G.nodeXY[e.v]);
