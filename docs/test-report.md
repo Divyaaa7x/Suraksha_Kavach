@@ -2,6 +2,13 @@
 
 Updated 20 November 2026. This report contains observed results only; unrun hardware and platform checks stay pending.
 
+## Current branch follow-up — 20 November 2026
+
+- Added optional `KAVACH_HUB_TOKEN` authentication for all `/v1/*` data routes except health, with bearer tokens sent by both the web dashboard and Android LAN sync. Dashboard token is held in the current browser tab; Android token stays in ViewModel memory and is masked in the Sync screen. A configured-token API regression test verifies missing/wrong tokens are rejected and a correct token is accepted.
+- Verification: Python suite **58 passed**, including rejection of tokens shorter than 32 UTF-8 bytes; Android `testDemoDebugUnitTest testProductionDebugUnitTest assembleDemoDebug` succeeded; dashboard JavaScript `node --check` and `git diff --check` passed. A live local hub check returned HTTP 401 without the token and HTTP 200 with it; health reported auth enabled.
+- Latest demo APK installed on the connected Pixel 8a. The device had returned to its secure lock screen during this check, so a fresh visual review and Android-to-hub sync with a token were not verified. Earlier Pixel map and UI observations are listed below and are not evidence for this auth change.
+- This remains partial security: if no token is configured the API is open; plain HTTP exposes bearer tokens to network interception. TLS, production identity/enrollment, device revocation, Nearby two-device validation and production release signing remain open.
+
 ## Automated checks
 
 | Check | Result | Evidence |

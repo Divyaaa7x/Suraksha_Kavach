@@ -51,6 +51,23 @@ def test_health_is_offline_and_labelled(client):
     assert "no field verification" in h["source_class_note"]
 
 
+def test_configured_hub_token_protects_dashboard_and_api_but_allows_health(tmp_path):
+    token = "test-token-1234567890abcdef1234567890"
+    client = TestClient(create_app(PACK, tmp_path / "secured.sqlite3", hub_token=token))
+    assert client.get("/v1/health").json()["hub_auth_enabled"] is True
+    assert client.get("/v1/assets").status_code == 401
+    assert client.get("/").status_code == 200
+    assert client.get("/v1/assets", headers={"Authorization": "Bearer wrong"}).status_code == 401
+    response = client.get("/v1/assets", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 200
+    assert response.json()["source_class"] == "SIMULATED"
+
+
+def test_configured_hub_token_rejects_short_secrets(tmp_path):
+    with pytest.raises(ValueError, match="at least 32"):
+        create_app(PACK, tmp_path / "weak.sqlite3", hub_token="short")
+
+
 def test_api_rejects_oversized_declared_body_before_json_parsing(client):
     response = client.post("/v1/events", content=b" " * (MAX_API_BODY_BYTES + 1))
     assert response.status_code == 413

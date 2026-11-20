@@ -70,6 +70,7 @@ class KavachViewModel(application: Application) : AndroidViewModel(application) 
     var selectedMapArea by mutableStateOf("IN-TG")
     var scenario by mutableStateOf("")
     var hubUrl by mutableStateOf("http://192.168.1.1:8000")
+    var hubToken by mutableStateOf("")
     var nearby by mutableStateOf<NearbyRelay?>(null)
         private set
 
@@ -180,7 +181,7 @@ class KavachViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             message = "Syncing with hub..."
             message = try {
-                withContext(Dispatchers.IO) { sync.sync(url).message }
+                withContext(Dispatchers.IO) { sync.sync(url, hubToken).message }
             } catch (e: Exception) {
                 "Hub not reachable on this LAN: ${e.message}"
             }

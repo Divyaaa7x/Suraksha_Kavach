@@ -68,7 +68,18 @@
 <header>
   <h1>SURAKSHA KAVACH · Command Hub <span class="muted" id="hstat">connecting…</span></h1>
 </header>
+<script>
+  const KAVACH_HUB_TOKEN = sessionStorage.getItem('kavachHubToken') || '';
+  window.KAVACH_SET_HUB_TOKEN = (token) => { sessionStorage.setItem('kavachHubToken', token.trim()); location.reload(); };
+</script>
 <div class="banner">Decision support only · OSM data is not a field inspection · crossings remain unknown until verified</div>
+<details class="card" style="margin:10px 12px 0">
+  <summary>Hub connection security</summary>
+  <label for="hubToken">Hub access token</label>
+  <input id="hubToken" type="password" autocomplete="off" placeholder="Only required when hub token auth is enabled">
+  <button id="saveHubToken" type="button">Save for this tab</button>
+  <p class="muted">Use HTTPS for remote access. A token over plain HTTP protects against casual access, not network interception.</p>
+</details>
 <details id="indiaPanel" class="india-overview">
   <summary><span>India overview</span><span class="muted" id="indiaSelection">Telangana selected</span></summary>
   <section class="card overview-content">
@@ -153,7 +164,9 @@ const canvas = $('map'), ctx = canvas.getContext('2d');
 const indiaCanvas = $('india'), indiaCtx = indiaCanvas.getContext('2d');
 
 async function j(url, opts) {
-  const r = await fetch(url, opts);
+  const headers = new Headers(opts?.headers || {});
+  if (KAVACH_HUB_TOKEN) headers.set('Authorization', `Bearer ${KAVACH_HUB_TOKEN}`);
+  const r = await fetch(url, {...opts, headers});
   if (!r.ok) throw new Error(url + ' ' + r.status);
   return r.json();
 }
@@ -455,6 +468,11 @@ $('mapSearch').addEventListener('input', () => {
   }));
   box.hidden = results.length === 0;
   $('mapSearch').setAttribute('aria-expanded', String(results.length > 0));
+});
+$('hubToken').value = KAVACH_HUB_TOKEN;
+$('saveHubToken').addEventListener('click', () => {
+  sessionStorage.setItem('kavachHubToken', $('hubToken').value.trim());
+  location.reload();
 });
 
 let drag = null, moved = false;

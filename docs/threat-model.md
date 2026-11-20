@@ -15,7 +15,7 @@ Scope: the prototype as built. Each row says what is implemented and what is sti
 | Malicious peer (Nearby) | Pairing code must be confirmed by a person; incoming payloads are size/item capped, events validated before storing, and ACKs are limited to IDs sent to that peer | Unit-tested; physical two-device exchange remains unverified |
 | Private key on device | Demo variant uses an intentionally public synthetic key; production event signing fails closed | **Open.** Provision an Android Keystore-compatible signing algorithm, device enrollment, key rotation/revocation, and hub trust distribution before operational use. |
 | Production pack trust | Production release build pins an externally supplied Ed25519 public key; release build is blocked without that key and a release keystore | Partial. Organization must provision and protect the matching pack-signing private key. |
-| Hub API abuse | Local-only demo, no authentication | **Open.** Add auth and TLS before any LAN outside a lab. |
+| Hub API abuse | Optional `KAVACH_HUB_TOKEN` bearer gate protects `/v1/*` data routes except health; dashboard shell remains accessible for token entry; token checked in constant time | Partial. Unconfigured deployments remain unauthenticated; bearer over HTTP can be intercepted. Require TLS and production identity/auth before non-lab use. |
 | Stolen device | None | **Open.** Needs revocation list and device lock policy. |
 | Cleartext LAN traffic | Only private addresses allowed by the network security config | Implemented |
 | Pack / model poisoning | Model code is not in the build; packs are signed | Partial (no ML models shipped) |

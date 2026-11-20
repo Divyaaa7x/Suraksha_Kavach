@@ -15,7 +15,7 @@ Offline-first, human-approved decision support for flood-related road access in 
 
 ## Important limits
 
-This is a research prototype. The phone uses a clearly labelled synthetic demo signing key, not Android Keystore provisioning. The local hub API is unauthenticated and accepts signatures from synthetic demo keys; keep it on a controlled private demo network and do not publish or expose it to the internet. The optional dashboard approval route is disabled unless `KAVACH_DEMO_MODE=1`, and remains synthetic when enabled. Nearby exchange has not been validated across two physical devices, and app performance has not been measured on a 2 GB phone. The app has no certified field data, live agency integration, structural inspection, guaranteed radio coverage, or autonomous dispatch. See [the threat model](docs/threat-model.md) and [the test report](docs/test-report.md).
+This is a research prototype. The phone uses a clearly labelled synthetic demo signing key, not Android Keystore provisioning. Configure `KAVACH_HUB_TOKEN` to require bearer authentication for all `/v1/*` data routes except health; the dashboard shell stays accessible so a coordinator can enter the token. Enter the same token in the dashboard tab and Android Sync screen. Without it, the API remains unauthenticated and is only suitable for a controlled demo network. A bearer token over HTTP does not provide transport confidentiality; never expose the hub publicly without TLS and production authentication. The optional dashboard approval route is disabled unless `KAVACH_DEMO_MODE=1`, and remains synthetic when enabled. Nearby exchange has not been validated across two physical devices, and app performance has not been measured on a 2 GB phone. The app has no certified field data, live agency integration, structural inspection, guaranteed radio coverage, or autonomous dispatch. See [the threat model](docs/threat-model.md) and [the test report](docs/test-report.md).
 
 ## Run the local hub
 
@@ -30,7 +30,7 @@ python -m pytest -q
 python -m uvicorn kavach.api:create_app --factory --app-dir server --host 0.0.0.0 --port 8000
 ```
 
-Open `http://127.0.0.1:8000/`. The default hub uses the OSM pack; the demo-pack build is for tests and explicit synthetic scenarios. For the demo pack, set `KAVACH_PACK_DIR=data/packs/kavach-demo-synthetic` before starting the hub. The API binds to all interfaces in the command above so a phone can reach it over a private LAN; use only in a controlled demo network because authentication is not implemented.
+Open `http://127.0.0.1:8000/`. The default hub uses the OSM pack; the demo-pack build is for tests and explicit synthetic scenarios. For the demo pack, set `KAVACH_PACK_DIR=data/packs/kavach-demo-synthetic` before starting the hub. To protect a private-LAN demo, configure a random token before starting the server (PowerShell: `$env:KAVACH_HUB_TOKEN = [guid]::NewGuid().ToString('N')`). Tokens shorter than 32 UTF-8 bytes are rejected. Enter it in the dashboard's Hub connection security panel and Android Sync screen. Health remains public for diagnostics. Without a token, all data routes are unauthenticated. The sample command binds to all interfaces; do not expose it to the internet, and use TLS for remote access.
 
 ## Android app
 

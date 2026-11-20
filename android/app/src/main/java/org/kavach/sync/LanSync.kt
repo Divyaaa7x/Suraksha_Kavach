@@ -28,7 +28,7 @@ class LanSync(private val node: KavachNode) {
 
     data class Outcome(val pushed: Int, val rejected: Int, val pulled: Int, val message: String)
 
-    suspend fun sync(baseUrl: String): Outcome {
+    suspend fun sync(baseUrl: String, hubToken: String = ""): Outcome {
         val base = URL(baseUrl.trimEnd('/'))
         require(isPrivateHubUrl(base)) { "hub must be an HTTP(S) service on a private LAN IPv4 address" }
 
@@ -37,7 +37,7 @@ class LanSync(private val node: KavachNode) {
         var pushed = 0
         var rejected = 0
         if (pending.isNotEmpty()) {
-            val results = postJson(URL("$base/v1/sync/batch"), pending) as List<*>
+            val results = postJson(URL("$base/v1/sync/batch"), pending, hubToken) as List<*>
             val acked = ArrayList<String>()
             results.forEachIndexed { i, r ->
                 @Suppress("UNCHECKED_CAST")
@@ -51,7 +51,7 @@ class LanSync(private val node: KavachNode) {
         }
 
         // Pull: events the hub has (approvals, other devices' reports) that we do not hold yet.
-        val hubEvents = getJson(URL("$base/v1/events")) as List<*>
+        val hubEvents = getJson(URL("$base/v1/events"), hubToken) as List<*>
         var pulled = 0
         for (item in hubEvents) {
             @Suppress("UNCHECKED_CAST")
@@ -62,22 +62,24 @@ class LanSync(private val node: KavachNode) {
         return Outcome(pushed, rejected, pulled, "pushed $pushed, pulled $pulled, rejected $rejected")
     }
 
-    private fun postJson(url: URL, payload: Any?): Any? {
+    private fun postJson(url: URL, payload: Any?, hubToken: String): Any? {
         val conn = (url.openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             doOutput = true
             connectTimeout = 5000
             readTimeout = 10000
             setRequestProperty("Content-Type", "application/json")
+            if (hubToken.isNotBlank()) setRequestProperty("Authorization", "Bearer $hubToken")
         }
         conn.outputStream.use { it.write(Json.canonical(payload).toByteArray(Charsets.UTF_8)) }
         return readJson(conn)
     }
 
-    private fun getJson(url: URL): Any? {
+    private fun getJson(url: URL, hubToken: String): Any? {
         val conn = (url.openConnection() as HttpURLConnection).apply {
             connectTimeout = 5000
             readTimeout = 10000
+            if (hubToken.isNotBlank()) setRequestProperty("Authorization", "Bearer $hubToken")
         }
         return readJson(conn)
     }

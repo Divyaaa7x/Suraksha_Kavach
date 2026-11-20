@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import hmac
 import os
 import tempfile
 import uuid
@@ -81,6 +82,30 @@ class ApiBodyLimitMiddleware:
         await self.app(scope, replay_body, send)
 
 
+class HubTokenMiddleware:
+    """Protect the LAN API and dashboard with a deployment-provided bearer token."""
+
+    def __init__(self, app: Callable[..., Awaitable[None]], token: str):
+        self.app = app
+        self.expected = f"Bearer {token}".encode("utf-8")
+
+    async def __call__(self, scope: dict[str, Any], receive: Callable[..., Awaitable[dict[str, Any]]],
+                       send: Callable[..., Awaitable[None]]) -> None:
+        path = scope.get("path", "")
+        if (scope["type"] != "http" or path == "/v1/health" or path == "/"
+                or path.startswith("/static/")):
+            await self.app(scope, receive, send)
+            return
+        headers = dict(scope.get("headers", []))
+        supplied = headers.get(b"authorization", b"")
+        if not hmac.compare_digest(supplied, self.expected):
+            response = JSONResponse({"detail": "hub authentication required"}, status_code=401,
+                                    headers={"WWW-Authenticate": "Bearer"})
+            await response(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
+
+
 class RouteRequest(BaseModel):
     origin: str = Field(max_length=32)
     destination: str = Field(max_length=32)
@@ -96,9 +121,15 @@ class DemoApprovalRequest(BaseModel):
 
 
 def create_app(pack_dir: Path = PACK_DIR, db_path: Path = DB_PATH,
-               demo_approvals_enabled: bool | None = None) -> FastAPI:
+               demo_approvals_enabled: bool | None = None,
+               hub_token: str | None = None) -> FastAPI:
     if demo_approvals_enabled is None:
         demo_approvals_enabled = os.environ.get("KAVACH_DEMO_MODE", "").lower() in {"1", "true", "yes"}
+    if hub_token is None:
+        hub_token = os.environ.get("KAVACH_HUB_TOKEN", "")
+    hub_token = hub_token.strip()
+    if hub_token and len(hub_token.encode("utf-8")) < 32:
+        raise ValueError("KAVACH_HUB_TOKEN must contain at least 32 UTF-8 bytes")
     db_path.parent.mkdir(parents=True, exist_ok=True)
     hub = Hub(db_path, pack_dir)
     app = FastAPI(title="SURAKSHA KAVACH local hub", version="0.2.0-prototype")
@@ -109,10 +140,13 @@ def create_app(pack_dir: Path = PACK_DIR, db_path: Path = DB_PATH,
     app.state.offline_map = OfflineMap(map_asset, map_meta, map_cache) if map_meta.is_file() and map_asset.is_file() else None
     app.add_middleware(GZipMiddleware, minimum_size=1024)
     app.add_middleware(ApiBodyLimitMiddleware)
+    if hub_token:
+        app.add_middleware(HubTokenMiddleware, token=hub_token)
 
     @app.get("/v1/health")
     def health():
-        return {**hub.health(), "demo_approvals_enabled": demo_approvals_enabled}
+        return {**hub.health(), "demo_approvals_enabled": demo_approvals_enabled,
+                "hub_auth_enabled": bool(hub_token)}
 
     @app.post("/v1/demo/approvals")
     def demo_approval(req: DemoApprovalRequest):

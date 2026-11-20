@@ -48,6 +48,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -541,6 +542,11 @@ private fun SyncScreen(vm: KavachViewModel, onStartNearby: () -> Unit) {
         OutlinedTextField(
             value = vm.hubUrl, onValueChange = { vm.hubUrl = it },
             label = { Text("Hub address (private LAN only)") }, modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            value = vm.hubToken, onValueChange = { vm.hubToken = it },
+            label = { Text("Hub access token (if configured)") }, modifier = Modifier.fillMaxWidth(),
+            visualTransformation = PasswordVisualTransformation(),
         )
         Button(onClick = { vm.syncHub() }, modifier = Modifier.padding(top = 8.dp)) { Text("Sync with hub now") }
         if (vm.message.isNotEmpty()) Text(vm.message, Modifier.padding(top = 6.dp), fontSize = 13.sp)
