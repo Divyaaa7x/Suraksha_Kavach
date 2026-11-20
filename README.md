@@ -40,7 +40,7 @@ The Android project has 26 demo and 27 production-variant debug unit tests (thre
 
 ## Rebuild the checked-in OSM pack
 
-The route graph source is `data/raw/osm-medak-kamareddy-2026-11-19.json` (OSM/ODbL). The India overview snapshot is `data/raw/india-admin1-overview.json`; `scripts/build_india_overview.py` refreshes it from a hash-pinned Natural Earth source. The Telangana display database is built from the [Geofabrik Southern Zone OSM extract](https://download.geofabrik.de/asia/india/southern-zone.html) and is packaged compressed in the Android assets. To rebuild it, download that PBF into `data/raw/southern-zone-latest.osm.pbf`, install the data-build requirements, then run:
+The current signed route graph source is `data/raw/osm-medak-kamareddy-2026-11-19.json` (OSM/ODbL). The India overview snapshot is `data/raw/india-admin1-overview.json`; `scripts/build_india_overview.py` refreshes it from a hash-pinned Natural Earth source. The Telangana display database is built from the [Geofabrik Southern Zone OSM extract](https://download.geofabrik.de/asia/india/southern-zone.html) and is packaged compressed in the Android assets. The same build pass also emits an experimental statewide `data/raw/telangana-routes.sqlite` with indexed road topology and place snaps. The app and hub do not consume or distribute that route database yet; routing remains limited to the signed Medak/Kamareddy pilot. To rebuild the data, download that PBF into `data/raw/southern-zone-latest.osm.pbf`, install the data-build requirements, then run:
 
 ```powershell
 python -m pip install -r server/requirements.txt osmium shapely

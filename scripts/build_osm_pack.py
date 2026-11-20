@@ -21,7 +21,6 @@ import datetime as dt
 import gzip
 import hashlib
 import json
-import math
 import os
 import shutil
 import sys
@@ -34,6 +33,7 @@ sys.path.insert(0, str(ROOT / "server"))
 from kavach.graph import criticality, graph_from_dict  # noqa: E402
 from kavach.pack import build_pack  # noqa: E402
 from build_india_overview import OUTPUT as INDIA_OVERVIEW  # noqa: E402
+from osm_routing import allowed_vehicles, haversine_m, oneway_direction  # noqa: E402
 
 RAW = ROOT / "data" / "raw" / "osm-medak-kamareddy-2026-11-19.json"
 OUT = ROOT / "data" / "packs" / "kavach-osm-medak-kamareddy"
@@ -42,7 +42,7 @@ TELANGANA_MAP = Path(os.environ.get("KAVACH_TELANGANA_MAP_DB", ROOT / "data" / "
 ANDROID_MAP = ROOT / "android" / "app" / "src" / "main" / "assets" / "maps" / "telangana-map.mapdata"
 LINK_RADIUS_M = 1500.0
 SPUR_SPEED_KMH = 20.0
-ROAD_SPEED_KMH = {
+PILOT_SPEED_KMH = {
     "motorway": 80, "trunk": 60, "primary": 50, "secondary": 40, "tertiary": 30,
     "unclassified": 25, "residential": 20,
 }
@@ -50,37 +50,6 @@ PLACE_KINDS = {"village", "town", "city", "hamlet"}
 HEALTH_KINDS = {"hospital", "clinic"}
 WATER_KINDS = {"river", "stream", "canal", "drain"}
 CROSSING_TAGS = ("bridge", "culvert", "ford")
-VEHICLE_CLASSES = ("light", "medium", "heavy")
-
-
-def oneway_direction(tags: dict) -> int | None:
-    """Return direction, or None when a time-dependent/unknown direction is unsafe to route."""
-    if "oneway:conditional" in tags or "oneway:motor_vehicle:conditional" in tags:
-        return None
-    value = tags.get("oneway:motor_vehicle", tags.get("oneway"))
-    if value in ("-1",):
-        return -1
-    if value in ("yes", "true", "1"):
-        return 1
-    if value in ("no", "false", "0"):
-        return 0
-    if value is not None:
-        return None
-    return 1 if tags.get("junction") in ("roundabout", "circular") else 0
-
-
-def allowed_vehicles(tags: dict) -> list[str] | None:
-    """Return None when unrestricted; otherwise list allowed classes (possibly empty)."""
-    denied = {"no", "private", "agricultural", "forestry", "destination", "delivery", "customers", "permit"}
-    permitted = []
-    for vehicle in VEHICLE_CLASSES:
-        specific = "motorcar" if vehicle == "light" else "hgv"
-        keys = (specific, "motor_vehicle", "vehicle", "access")
-        value = next((tags[k] for k in keys if k in tags), None)
-        if value not in denied:
-            permitted.append(vehicle)
-    return None if len(permitted) == len(VEHICLE_CLASSES) else permitted
-
 LICENSES = """REAL DATA PACK, built from OpenStreetMap.
 (c) OpenStreetMap contributors. Data is available under the Open Database License (ODbL) 1.0:
 https://www.openstreetmap.org/copyright  — keep this attribution with any map or export.
@@ -95,15 +64,6 @@ India overview boundaries: Natural Earth Admin 1 States and Provinces (1:10m), f
 source https://www.naturalearthdata.com/downloads/10m-cultural-vectors/10m-admin-1-states-provinces/.
 Natural Earth data is public domain. These reference boundaries are not authoritative legal limits.
 """
-
-
-def haversine_m(lat1, lon1, lat2, lon2) -> float:
-    r = 6371000.0
-    p1, p2 = math.radians(lat1), math.radians(lat2)
-    dp = p2 - p1
-    dl = math.radians(lon2 - lon1)
-    h = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
-    return 2 * r * math.asin(math.sqrt(h))
 
 
 def sha256_file(path: Path) -> str:
@@ -160,7 +120,7 @@ def main() -> None:
     for w in road_ways:
         tags = w["tags"]
         hw = tags["highway"]
-        if hw not in ROAD_SPEED_KMH:
+        if hw not in PILOT_SPEED_KMH:
             continue
         refs = [f"n{i}" for i in w["nodes"]]
         direction = oneway_direction(tags)
@@ -187,7 +147,7 @@ def main() -> None:
                 "edge_id": f"R{w['id']}.{i}",
                 "u": u, "v": v,
                 "length_m": round(haversine_m(*coords[u], *coords[v]), 1),
-                "speed_kmh": float(ROAD_SPEED_KMH[hw]),
+                "speed_kmh": float(PILOT_SPEED_KMH[hw]),
                 "crossing_id": crossing_id,
                 "oneway": direction != 0,
                 "allowed_vehicles": permitted or [],

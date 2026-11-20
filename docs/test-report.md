@@ -10,6 +10,14 @@ Updated 20 November 2026. This report contains observed results only; unrun hard
 - A full Southern Zone PBF map build completed in about ten minutes and reported 854,785 contextual roads, 532,186 roads with Telangana nodes, 9,847 waterways and 33,596 places/facilities. Its SQLite output differed slightly from the already signed map archive (four spatial-cell rows and file hash), so the signed asset was left unchanged. This pass did not generate a statewide routing graph.
 - Remaining release gates: statewide offline routing and place search; production key/device enrollment and release signing; mandatory secure hub deployment and hosting; two-device Nearby field checks; Pixel interaction review and 2 GB device performance checks. Debug APK success is not production readiness.
 
+## Statewide route data prototype — 20 November 2026
+
+- The offline map builder now creates an additional indexed SQLite route database during the same PBF pass. Against the Southern Zone source, it produced **3,897,281 nodes, 4,165,108 segments, 10,158 tagged crossings, and 20,610 snapped places/facilities out of 21,157**. It excludes explicitly closed/private/destination-only and conditional-access roads, stores per-class access masks, and applies one-way direction.
+- The final route DB schema uses numeric way/segment keys and indexed `u`/`v` adjacency; temporary snap-grid rows are removed. The generated 590,577,664-byte DB passed SQLite `integrity_check`. Gzip at level 6 measured 297,135,922 bytes. The adjacency query plan uses both indexes.
+- A desktop SQLite A* baseline from Kamareddy to Nizamabad found a 754-segment path in 2.06 seconds after 37,807 expansions. It crossed 10 tagged structures; because status-policy filtering is not connected in this prototype, this demonstrates topology only and must not be used as a safe route.
+- Builder tests cover access rules, direction handling, stable nearest-place snapping, and adjacency index use. Full Python suite: **63 passed**.
+- This route DB is not packaged or consumed by Android or the hub. Its compressed size exceeds GitHub's normal per-file limit, and the repository has no configured Git LFS upload access. Statewide routing, safe crossing-status decisions, app search/highlighting, and device performance remain incomplete.
+
 ## Current branch follow-up — 20 November 2026
 
 - Added optional `KAVACH_HUB_TOKEN` authentication for all `/v1/*` data routes except health, with bearer tokens sent by both the web dashboard and Android LAN sync. Dashboard token is held in the current browser tab; Android token stays in ViewModel memory and is masked in the Sync screen. A configured-token API regression test verifies missing/wrong tokens are rejected and a correct token is accepted.
