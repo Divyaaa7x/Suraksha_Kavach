@@ -5,14 +5,16 @@
     "Places and health facilities are linked to the nearest road node within 1500 m by a straight access spur. The spur is an assumption, not a mapped road.",
     "Speeds are class defaults for travel-time comparison only. They are not measured.",
     "Settlement populations come from OSM 'population' tags where present, else are unknown. They are estimates.",
-    "The extract is clipped to a bounding box; roads that leave the box may look cut off."
+    "The extract is clipped to a bounding box; roads that leave the box may look cut off.",
+    "OSM access tags are applied by vehicle class; conditional access and dimensional restrictions are not modeled."
   ],
   "counts": {
     "access_spurs": 605,
     "crossings_from_osm_tags": 96,
     "facilities": 132,
     "features": 52,
-    "road_edges": 67452,
+    "road_edges": 67441,
+    "roads_excluded_no_motor_vehicle_access": 1,
     "settlements": 473
   },
   "default_policy": "strict",

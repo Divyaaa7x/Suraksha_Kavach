@@ -50,6 +50,7 @@ class Edge:
     speed_kmh: float = 30.0
     crossing_id: str | None = None
     oneway: bool = False
+    allowed_vehicles: frozenset[str] = frozenset()
 
 
 @dataclass
@@ -74,7 +75,8 @@ class RoadGraph:
         blob = json.dumps(
             {
                 "nodes": sorted((n.node_id, n.kind, n.lat, n.lon) for n in self.nodes.values()),
-                "edges": sorted((e.edge_id, e.u, e.v, e.length_m, e.speed_kmh, e.crossing_id, e.oneway)
+                "edges": sorted((e.edge_id, e.u, e.v, e.length_m, e.speed_kmh, e.crossing_id, e.oneway,
+                                 sorted(e.allowed_vehicles))
                                 for e in self.edges.values()),
             },
             sort_keys=True,
@@ -183,7 +185,10 @@ def plan_route(graph: RoadGraph, statuses: dict[str, str], origin: str, dest: st
     for e in graph.edges.values():
         crossing = graph.crossings.get(e.crossing_id) if e.crossing_id else None
         status = statuses.get(e.crossing_id, UNKNOWN) if e.crossing_id else None
-        ok, reason, unc = edge_policy_decision(status or UNKNOWN, vehicle, crossing, policy)
+        if e.allowed_vehicles and vehicle not in e.allowed_vehicles:
+            ok, reason, unc = False, f"HARD: vehicle access denied for {vehicle}", False
+        else:
+            ok, reason, unc = edge_policy_decision(status or UNKNOWN, vehicle, crossing, policy)
         allowed[e.edge_id] = ok
         if not ok:
             excluded.append({"edge_id": e.edge_id, "crossing_id": e.crossing_id, "reason": reason})
@@ -210,9 +215,9 @@ def plan_route(graph: RoadGraph, statuses: dict[str, str], origin: str, dest: st
             "edges": [e.edge_id for e in path_edges], "travel_time_s": round(cost, 1), "caveat": caveat}
 
 
-def shortest_path(graph: RoadGraph, origin: str, dest: str) -> dict:
+def shortest_path(graph: RoadGraph, origin: str, dest: str, vehicle: str = "light") -> dict:
     """Baseline: ignores crossing status entirely (dossier H2 comparison)."""
-    allowed = {e.edge_id: True for e in graph.edges.values()}
+    allowed = {e.edge_id: (not e.allowed_vehicles or vehicle in e.allowed_vehicles) for e in graph.edges.values()}
     result = _astar(graph, origin, dest, allowed)
     if result is None:
         return {"result": "NO_ROUTE", "path": [], "travel_time_s": None}
@@ -242,6 +247,8 @@ def _eligible_edges(graph: RoadGraph, statuses: dict[str, str], vehicle: str, po
     out = set()
     for e in graph.edges.values():
         if e.edge_id in blocked:
+            continue
+        if e.allowed_vehicles and vehicle not in e.allowed_vehicles:
             continue
         if e.crossing_id:
             crossing = graph.crossings.get(e.crossing_id)
@@ -300,7 +307,8 @@ def inspection_ranking(graph: RoadGraph, statuses: dict[str, str]) -> list[dict]
 
 def graph_from_dict(d: dict) -> RoadGraph:
     nodes = {n["node_id"]: Node(**n) for n in d["nodes"]}
-    edges = {e["edge_id"]: Edge(**e) for e in d["edges"]}
+    edges = {e["edge_id"]: Edge(**{**e, "allowed_vehicles": frozenset(e.get("allowed_vehicles", []))})
+             for e in d["edges"]}
     crossings = {c["crossing_id"]: Crossing(c["crossing_id"], c.get("kind", "culvert"),
                                             frozenset(c.get("restrict_to", []))) for c in d.get("crossings", [])}
     return RoadGraph(nodes=nodes, edges=edges, crossings=crossings,

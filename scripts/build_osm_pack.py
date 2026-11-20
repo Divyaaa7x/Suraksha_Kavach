@@ -50,6 +50,32 @@ PLACE_KINDS = {"village", "town", "city", "hamlet"}
 HEALTH_KINDS = {"hospital", "clinic"}
 WATER_KINDS = {"river", "stream", "canal", "drain"}
 CROSSING_TAGS = ("bridge", "culvert", "ford")
+VEHICLE_CLASSES = ("light", "medium", "heavy")
+
+
+def oneway_direction(tags: dict) -> int:
+    """Return 1 for forward, -1 for reverse, 0 for bidirectional OSM motor access."""
+    value = tags.get("oneway:motor_vehicle", tags.get("oneway"))
+    if value in ("-1",):
+        return -1
+    if value in ("yes", "true", "1"):
+        return 1
+    if value in ("no", "false", "0"):
+        return 0
+    return 1 if tags.get("junction") in ("roundabout", "circular") else 0
+
+
+def allowed_vehicles(tags: dict) -> list[str] | None:
+    """Return None when unrestricted; otherwise list allowed classes (possibly empty)."""
+    denied = {"no", "private", "agricultural", "forestry"}
+    permitted = []
+    for vehicle in VEHICLE_CLASSES:
+        specific = "motorcar" if vehicle == "light" else "hgv"
+        keys = (specific, "motor_vehicle", "vehicle", "access")
+        value = next((tags[k] for k in keys if k in tags), None)
+        if value not in denied:
+            permitted.append(vehicle)
+    return None if len(permitted) == len(VEHICLE_CLASSES) else permitted
 
 LICENSES = """REAL DATA PACK, built from OpenStreetMap.
 (c) OpenStreetMap contributors. Data is available under the Open Database License (ODbL) 1.0:
@@ -133,7 +159,12 @@ def main() -> None:
         if hw not in ROAD_SPEED_KMH:
             continue
         refs = [f"n{i}" for i in w["nodes"]]
-        oneway = tags.get("oneway") in ("yes", "true", "1")
+        direction = oneway_direction(tags)
+        permitted = allowed_vehicles(tags)
+        if permitted == []:
+            continue
+        if direction == -1:
+            refs.reverse()
         crossing_id, crossing_kind = None, None
         for key in CROSSING_TAGS:
             if tags.get(key) not in (None, "no"):
@@ -152,7 +183,8 @@ def main() -> None:
                 "length_m": round(haversine_m(*coords[u], *coords[v]), 1),
                 "speed_kmh": float(ROAD_SPEED_KMH[hw]),
                 "crossing_id": crossing_id,
-                "oneway": oneway,
+                "oneway": direction != 0,
+                "allowed_vehicles": permitted or [],
             })
 
     for nid in road_node_ids:

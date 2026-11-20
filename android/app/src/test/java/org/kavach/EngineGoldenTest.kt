@@ -32,6 +32,18 @@ class EngineGoldenTest {
     }
 
     @Test
+    fun vehicleAccessIsEnforcedInBaselineAndPlanner() {
+        val restricted = RoadGraph.fromJson(
+            File("src/test/resources/synthetic/graph.json").readText(Charsets.UTF_8)
+                .replace("\"edge_id\": \"E1\",", "\"edge_id\": \"E1\",\n      \"allowed_vehicles\": [\"heavy\"],")
+        )
+        assertEquals(listOf("E3", "E4", "E5"), Engine.shortestPath(restricted, "A", "H").edges)
+        assertEquals(listOf("E1", "E2"), Engine.shortestPath(restricted, "A", "H", "heavy").edges)
+        val route = Engine.planRoute(restricted, unknown, "A", "H", policy = Policy.UNVERIFIED_WARNING)
+        assertTrue(route.excluded.any { it.edgeId == "E1" && it.reason.contains("vehicle access denied") })
+    }
+
+    @Test
     fun unknownCrossingsExcludedUnderStrictPolicy() {
         val r = Engine.planRoute(graph, unknown, "A", "H")
         assertEquals("NO_VERIFIED_ROUTE", r.result)

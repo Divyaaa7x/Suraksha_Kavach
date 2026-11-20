@@ -18,6 +18,17 @@ def test_baseline_shortest_path_ignores_status():
     assert r["edges"] == ["E1", "E2"]
 
 
+def test_vehicle_access_is_enforced_in_planning_baseline_and_isolation():
+    data = __import__("copy").deepcopy(__import__("kavach.fixtures", fromlist=["golden_graph"]).golden_graph())
+    data["edges"][0]["allowed_vehicles"] = ["heavy"]
+    graph = G.graph_from_dict(data)
+    assert G.shortest_path(graph, "A", "H", vehicle="light")["edges"] == ["E3", "E4", "E5"]
+    assert G.shortest_path(graph, "A", "H", vehicle="heavy")["edges"] == ["E1", "E2"]
+    light = G.plan_route(graph, st(C1=G.VERIFIED_OPEN), "A", "H", vehicle="light")
+    assert "E1" in {edge["edge_id"] for edge in light["excluded_edges"]}
+    assert "vehicle access denied" in next(edge["reason"] for edge in light["excluded_edges"] if edge["edge_id"] == "E1")
+
+
 def test_unknown_crossings_are_excluded_under_strict_policy():
     r = G.plan_route(GRAPH, UNK, "A", "H")
     assert r["result"] == "NO_VERIFIED_ROUTE"

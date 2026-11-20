@@ -127,7 +127,9 @@ object Engine {
         for (e in graph.edges.values.sortedBy { it.id }) {
             val crossing = e.crossingId?.let { graph.crossings[it] }
             val status = e.crossingId?.let { statuses[it] ?: Status.UNKNOWN } ?: Status.UNKNOWN
-            val d = edgeDecision(status, vehicle, crossing, policy)
+            val d = if (e.allowedVehicles.isNotEmpty() && vehicle !in e.allowedVehicles)
+                Decision(false, "HARD: vehicle access denied for $vehicle", false)
+            else edgeDecision(status, vehicle, crossing, policy)
             if (d.eligible) allowed.add(e.id) else excluded.add(Excluded(e.id, e.crossingId, d.reason))
             if (d.eligible && d.uncertain) uncertain.add(Excluded(e.id, e.crossingId, d.reason))
         }
@@ -145,8 +147,8 @@ object Engine {
             Math.round(cost * 10) / 10.0, excluded, uncertain, graph.version, policy, caveat)
     }
 
-    fun shortestPath(graph: RoadGraph, origin: String, dest: String): ShortestPath {
-        val all = graph.edges.keys.toSet()
+    fun shortestPath(graph: RoadGraph, origin: String, dest: String, vehicle: String = "light"): ShortestPath {
+        val all = graph.edges.values.filter { it.allowedVehicles.isEmpty() || vehicle in it.allowedVehicles }.map { it.id }.toSet()
         val found = astar(graph, origin, dest, all) ?: return ShortestPath(emptyList(), emptyList(), null)
         return ShortestPath(sequence(origin, found.second), found.second.map { it.id },
             Math.round(found.first * 10) / 10.0)
@@ -177,6 +179,7 @@ object Engine {
         val usable = HashSet<String>()
         for (e in graph.edges.values) {
             if (e.crossingId != null && e.crossingId in blockedCrossings) continue
+            if (e.allowedVehicles.isNotEmpty() && vehicle !in e.allowedVehicles) continue
             if (e.crossingId != null) {
                 val d = edgeDecision(statuses[e.crossingId] ?: Status.UNKNOWN, vehicle,
                     graph.crossings[e.crossingId], policy)

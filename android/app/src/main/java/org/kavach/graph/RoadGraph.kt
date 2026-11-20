@@ -43,6 +43,7 @@ data class Edge(
     val speedKmh: Double,
     val crossingId: String?,
     val oneway: Boolean,
+    val allowedVehicles: Set<String> = emptySet(),
 )
 
 data class Crossing(val id: String, val kind: String, val restrictTo: Set<String>)
@@ -90,6 +91,7 @@ class RoadGraph(
                     speedKmh = num(it["speed_kmh"]),
                     crossingId = it["crossing_id"] as String?,
                     oneway = it["oneway"] as Boolean,
+                    allowedVehicles = ((it["allowed_vehicles"] as? List<*>) ?: emptyList<Any>()).map { v -> v as String }.toSet(),
                 )
             }.associateBy { it.id }
             val crossings = ((root["crossings"] as? List<Map<String, Any?>>) ?: emptyList()).map {
@@ -116,7 +118,7 @@ class RoadGraph(
             val parts = StringBuilder()
             nodes.sortedBy { it.id }.forEach { parts.append("N|${it.id}|${it.kind}|${it.lat}|${it.lon};") }
             edges.sortedBy { it.id }.forEach {
-                parts.append("E|${it.id}|${it.u}|${it.v}|${it.lengthM}|${it.speedKmh}|${it.crossingId}|${it.oneway};")
+                parts.append("E|${it.id}|${it.u}|${it.v}|${it.lengthM}|${it.speedKmh}|${it.crossingId}|${it.oneway}|${it.allowedVehicles.sorted()};")
             }
             return "g-" + Crypto.sha256Hex(parts.toString().toByteArray()).take(12)
         }
