@@ -6,7 +6,7 @@ Updated 20 November 2026. This report contains observed results only; unrun hard
 
 | Check | Result | Evidence |
 |---|---|---|
-| Python unit/integration suite | PASS | `python -m pytest -q`: 42 tests passed on Windows/Python 3.14.7, including India overview, demo-approval guard, and parallel dashboard SQLite read cases. |
+| Python unit/integration suite | PASS | `python -m pytest -q`: 44 tests passed on Windows/Python 3.14.7, including India overview, demo-approval guard, and parallel dashboard SQLite read cases. |
 | Android build | PASS | Gradle 8.11.1, JDK 21, Android SDK platform 34: `testDebugUnitTest assembleDebug` succeeded. |
 | Android Kotlin unit tests | PASS | 22 tests across graph, JSON/crypto, pack verification, LAN URL validation, and Nearby payload batching; zero failures. |
 | Install and launch on Pixel 8a | PASS | Debug APK installed through ADB; `org.kavach/.MainActivity` launched on Android 17. |
@@ -20,6 +20,15 @@ Updated 20 November 2026. This report contains observed results only; unrun hard
 | OSM pack verification and provenance rules | PASS | `tests/test_real_pack.py`; crossings start unknown. |
 | Android APK data pack matches signed hub pack | PASS | `test_apk_pack_is_byte_identical_and_verified`. |
 | Pack rebuild | PASS | `scripts/build_demo_pack.py` and `scripts/build_osm_pack.py`; OSM pack build also synchronizes Android assets. |
+
+## Follow-up validation — 20 November 2026
+
+- Fixed Android road-name generation so a named road contributes one midpoint label, regardless of how many geometry points it contains.
+- Added dashboard map zoom and fit controls, keyboard pan/zoom/reset, and a keyboard-accessible pilot-crossing selector with status details.
+- Python suite: 44 passed. Android `testDebugUnitTest assembleDebug`: build successful with the project toolchain (Gradle 8.11.1, JDK 21, SDK 34). Dashboard inline JavaScript passed `node --check`.
+- Pixel 8a (Android 17): installed and launched the updated APK over wireless ADB; verified India overview, statewide Telangana map rendering, zoom/pan, route candidate calculation (95 nodes, 94 segments), and route display on the map. Opened the report form and inspected validation fields without submitting a fabricated report. Filtered logcat showed no app crash or SQLite errors.
+- Dashboard browser: verified route calculation, crossing selection, zoom button and keyboard pan. At a 390 px mobile viewport, document width remained 390 px with a 340 px map; desktop viewport was 1440 px. Captured screenshots at both sizes.
+- No Cloudflare deployment was performed. The page still depends on the FastAPI `/v1/*` API; the hub is unauthenticated and intended for a private demo LAN, so it must not be exposed publicly as-is.
 
 ## Pending checks
 

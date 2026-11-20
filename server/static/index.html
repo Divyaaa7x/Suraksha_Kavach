@@ -23,6 +23,10 @@
   #mapwrap { position:relative; }
   canvas#india { width:100%; height:320px; display:block; background:#eef1ee; border-radius:8px; }
   canvas#map { width:100%; height:560px; display:block; background:#eef1ee; border-radius:8px; cursor:grab; touch-action:none; }
+  canvas#map:focus-visible { outline:3px solid #087e68; outline-offset:2px; }
+  .map-controls { position:absolute; top:10px; right:10px; display:grid; gap:6px; width:42px; }
+  .map-controls button { margin:0; min-height:42px; padding:6px; background:var(--card); color:var(--fg); box-shadow:0 1px 5px #0003; }
+  .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
   .attrib { position:absolute; right:8px; bottom:6px; font-size:11px; background:rgba(255,255,255,.85); color:#222; padding:2px 6px; border-radius:4px; }
   .legend span { display:inline-block; margin:2px 8px 2px 0; font-size:12px; }
   .dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:4px; vertical-align:middle; }
@@ -56,11 +60,19 @@
   <section class="card">
     <h2>Telangana · offline map</h2>
     <div id="mapwrap">
-      <canvas id="map" aria-label="Road network with crossing status; drag to pan, wheel to zoom"></canvas>
+      <canvas id="map" tabindex="0" role="application" aria-label="Interactive Telangana road map" aria-describedby="mapHelp"></canvas>
+      <div class="map-controls" role="group" aria-label="Map controls">
+        <button id="zoomIn" type="button" aria-label="Zoom in">+</button>
+        <button id="zoomOut" type="button" aria-label="Zoom out">−</button>
+        <button id="resetMap" type="button" aria-label="Fit Telangana map">⌂</button>
+      </div>
       <div class="attrib">© OpenStreetMap contributors · ODbL</div>
     </div>
     <div class="legend" id="legend"></div>
-    <div class="detail" id="detail">Tap a marked pilot crossing to see its status and what depends on it.</div>
+    <p class="sr-only" id="mapHelp">Use arrow keys to pan, plus and minus to zoom, and Home to fit the map. Select a crossing below to read its current status.</p>
+    <label for="crossingPicker">Pilot crossing</label>
+    <select id="crossingPicker" aria-label="Select a pilot crossing"><option value="">Choose a crossing</option></select>
+    <div class="detail" id="detail" role="status" aria-live="polite">Select a marked pilot crossing to see its status and what depends on it.</div>
     <p class="muted" id="mapSource" aria-live="polite">Loading offline Telangana map…</p>
     <p class="muted" id="gver"></p>
   </section>
@@ -106,7 +118,7 @@ const ROAD_W = { motorway:3, trunk:3, primary:2.5, secondary:2, tertiary:1.6, un
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-let G = null, F = null, INDIA = null, selectedState = 'IN-TG', ST = {}, view = {x:0, y:0, k:1}, bounds, roadPath = null, crossEdges = [], selected = null, routeEdges = new Set(), offlineMap = null, mapTimer = null, mapRequest = 0;
+let G = null, F = null, INDIA = null, selectedState = 'IN-TG', ST = {}, view = {x:0, y:0, k:1}, bounds, roadPath = null, crossEdges = [], selected = null, routeEdges = new Set(), offlineMap = null, mapTimer = null, mapRequest = 0, detailRequest = 0;
 const canvas = $('map'), ctx = canvas.getContext('2d');
 const indiaCanvas = $('india'), indiaCtx = indiaCanvas.getContext('2d');
 
@@ -165,6 +177,8 @@ function buildRoadPaths() {
       crossEdges.push(e);
     }
   }
+  const crossings = [...new Set(crossEdges.map(e => e.crossing_id))].sort();
+  $('crossingPicker').innerHTML = '<option value="">Choose a crossing</option>' + crossings.map(id => `<option value="${esc(id)}">${esc(id)}</option>`).join('');
   roadPath.__width = 1;
 }
 
@@ -293,6 +307,30 @@ canvas.addEventListener('wheel', (ev) => {
   draw(); scheduleOfflineMap();
 }, { passive: false });
 
+function zoomAt(f, px = canvas.clientWidth / 2, py = canvas.clientHeight / 2) {
+  view.x = px - (px - view.x) * f; view.y = py - (py - view.y) * f;
+  view.k = Math.max(1, Math.min(12000, view.k * f));
+  draw(); scheduleOfflineMap();
+}
+$('zoomIn').addEventListener('click', () => zoomAt(1.25));
+$('zoomOut').addEventListener('click', () => zoomAt(1 / 1.25));
+$('resetMap').addEventListener('click', () => { bounds = stateBounds(); fit(); draw(); });
+canvas.addEventListener('keydown', (ev) => {
+  const step = 40;
+  if (ev.key === 'ArrowLeft') view.x += step;
+  else if (ev.key === 'ArrowRight') view.x -= step;
+  else if (ev.key === 'ArrowUp') view.y += step;
+  else if (ev.key === 'ArrowDown') view.y -= step;
+  else if (ev.key === '+' || ev.key === '=') zoomAt(1.25);
+  else if (ev.key === '-') zoomAt(1 / 1.25);
+  else if (ev.key === 'Home') { bounds = stateBounds(); fit(); draw(); }
+  else return;
+  ev.preventDefault(); draw(); scheduleOfflineMap();
+});
+$('crossingPicker').addEventListener('change', () => {
+  if ($('crossingPicker').value) showDetail($('crossingPicker').value);
+});
+
 let drag = null, moved = false;
 canvas.addEventListener('pointerdown', (ev) => { drag = {x: ev.clientX, y: ev.clientY}; moved = false; canvas.setPointerCapture(ev.pointerId); });
 canvas.addEventListener('pointermove', (ev) => {
@@ -311,11 +349,18 @@ canvas.addEventListener('pointerup', (ev) => {
 
 async function showDetail(id) {
   selected = id;
+  const request = ++detailRequest;
   const s = ST[id] || {status:'UNKNOWN'};
-  const insp = (await j('/v1/inspection-ranking')).find(r => r.crossing_id === id);
-  const dep = insp ? `${insp.settlements_cut_off_if_closed} settlement(s) depend on this crossing (structural).` : 'No settlement depends on this crossing alone.';
-  $('detail').innerHTML = `<b>${esc(id)}</b> · <span class="badge" style="color:${COLORS[s.status]}">${esc(s.status)}</span>` +
-    (s.conflict_with_reports ? ' · <b>conflicting reports</b>' : '') + `<br>${dep} OSM tag, not an inspection.`;
+  try {
+    const insp = (await j('/v1/inspection-ranking')).find(r => r.crossing_id === id);
+    if (request !== detailRequest) return;
+    const dep = insp ? `${insp.settlements_cut_off_if_closed} settlement(s) depend on this crossing (structural).` : 'No settlement depends on this crossing alone.';
+    $('detail').innerHTML = `<b>${esc(id)}</b> · <span class="badge" style="color:${COLORS[s.status]}">${esc(s.status)}</span>` +
+      (s.conflict_with_reports ? ' · <b>conflicting reports</b>' : '') + `<br>${dep} OSM tag, not an inspection.`;
+  } catch (err) {
+    if (request !== detailRequest) return;
+    $('detail').textContent = `${id} · ${s.status}. Dependency details unavailable: ${err.message}`;
+  }
   draw();
 }
 

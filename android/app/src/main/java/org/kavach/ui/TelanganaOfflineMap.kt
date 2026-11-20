@@ -261,11 +261,11 @@ fun TelanganaOfflineMap(
                     if (road.id in routeWays) {
                         if (i == 0) routePath.moveTo(x, y) else routePath.lineTo(x, y)
                     }
-                    val labelZoom = when (klass) { 2 -> 9; 1 -> 11; else -> 14 }
-                    if (road.inState && road.name.isNotBlank() && area.zoom >= labelZoom && roadLabels.size < 400) {
-                        val point = road.points[road.points.size / 2]
-                        roadLabels += OfflinePlace("road", road.name, point.first, point.second)
-                    }
+                }
+                val labelZoom = when (klass) { 2 -> 9; 1 -> 11; else -> 14 }
+                if (road.inState && road.name.isNotBlank() && area.zoom >= labelZoom && roadLabels.size < 400) {
+                    val point = road.points[road.points.size / 2]
+                    roadLabels += OfflinePlace("road", road.name, point.first, point.second)
                 }
             }
             val water = Path()
