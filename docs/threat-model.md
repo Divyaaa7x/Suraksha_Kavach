@@ -4,7 +4,7 @@ Scope: the prototype as built. Each row says what is implemented and what is sti
 
 | Threat | Mitigation in this build | Status |
 |---|---|---|
-| Fake responder report | Ed25519 signature checked against an offline trust registry (`core/Trust.kt`, `server/kavach/signing.py`) | Implemented. Keys are SYNTHETIC demo keys. |
+| Fake responder report | Ed25519 signature checked against an offline trust registry (`core/Trust.kt`, `server/kavach/signing.py`); signer IDs must match the signed origin, scoped keys are restricted to their asset, unsupported OFFICIAL/MODEL source claims are rejected | Implemented for the prototype. Keys are SYNTHETIC demo keys. |
 | Forged or edited event | Canonical JSON is signed; any change fails verification (tested) | Implemented |
 | Replay / reused event_id | Append-only store; identical duplicates acknowledged; different content rejected | Implemented |
 | Unauthorised approval | Only the `supervisor` role may approve; enforced on both phone and hub | Implemented |

@@ -6,6 +6,7 @@ and conflicting content under an existing event_id is rejected (T-10, T-11, repl
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 import threading
 from datetime import datetime, timezone
@@ -32,7 +33,7 @@ OBS_FIELDS = {"event_id", "kind", "asset_id", "observation_type", "observed_at",
               "evidence_sha256", "source_class", "pack_version", "origin_key_id", "note"}
 APP_FIELDS = {"event_id", "kind", "asset_id", "approved_status", "approved_at", "rationale",
               "source_class", "pack_version", "origin_key_id"}
-SOURCE_CLASSES = {"FIELD", "OFFICIAL", "MODEL", "SIMULATED"}
+SOURCE_CLASSES = {"FIELD", "SIMULATED"}
 
 
 class Hub:
@@ -61,6 +62,8 @@ class Hub:
             signature, key_id = raw["signature"], raw["key_id"]
         except KeyError as exc:
             return self._reject(f"missing field {exc}")
+        if not isinstance(signature, str) or not isinstance(key_id, str):
+            return self._reject("signature and key_id must be text")
 
         kind = body.get("kind")
         if kind == "OBSERVATION":
@@ -74,10 +77,13 @@ class Hub:
         if err:
             return self._reject(err)
 
+        if body["origin_key_id"] != key_id:
+            return self._reject("origin_key_id does not match signing key_id")
+
         if body["asset_id"] not in self.graph.crossings:
             return self._reject(f"asset {body['asset_id']} not in pack {self.pack_version}")
 
-        ok, msg = self.trust.verify(body, signature, key_id, role)
+        ok, msg = self.trust.verify(body, signature, key_id, role, asset_id=body["asset_id"])
         if not ok:
             return self._reject(f"signature check failed: {msg}")
 
@@ -102,15 +108,40 @@ class Hub:
     def _check_observation(self, b: dict) -> str | None:
         if set(b) - OBS_FIELDS:
             return f"unexpected fields {sorted(set(b) - OBS_FIELDS)}"
-        if b.get("observation_type") not in OBSERVATION_TYPES:
+        missing = OBS_FIELDS - set(b)
+        if missing:
+            return f"missing fields {sorted(missing)}"
+        if not self._valid_common_fields(b):
+            return "event_id, asset_id, origin_key_id and pack_version must be text"
+        if not isinstance(b.get("observation_type"), str) or b["observation_type"] not in OBSERVATION_TYPES:
             return "observation_type invalid"
-        if b.get("source_class") not in SOURCE_CLASSES:
+        if not isinstance(b.get("source_class"), str) or b["source_class"] not in SOURCE_CLASSES:
             return "source_class invalid"
-        pos = b.get("position") or {}
-        if not isinstance(pos.get("lat"), (int, float)) or not isinstance(pos.get("lon"), (int, float)):
+        pos = b.get("position")
+        if not isinstance(pos, dict):
             return "position required"
-        if not isinstance(b.get("evidence_sha256", []), list):
-            return "evidence_sha256 must be a list"
+        lat, lon, accuracy = pos.get("lat"), pos.get("lon"), pos.get("accuracy_m")
+        try:
+            valid_numbers = all(not isinstance(n, bool) and isinstance(n, (int, float)) and math.isfinite(float(n))
+                                for n in (lat, lon, accuracy))
+        except (OverflowError, ValueError):
+            valid_numbers = False
+        if not valid_numbers:
+            return "position coordinates and accuracy must be finite numbers"
+        if not -90 <= lat <= 90 or not -180 <= lon <= 180 or accuracy < 0:
+            return "position coordinates or accuracy are outside valid ranges"
+        try:
+            observed_at = datetime.fromisoformat(b["observed_at"])
+        except (TypeError, ValueError):
+            return "observed_at must be ISO 8601"
+        if observed_at.utcoffset() is None:
+            return "observed_at must include a timezone"
+        hashes = b.get("evidence_sha256")
+        if not isinstance(hashes, list) or any(not isinstance(h, str) or len(h) != 64 or
+                                                any(c not in "0123456789abcdefABCDEF" for c in h) for h in hashes):
+            return "evidence_sha256 must contain SHA-256 hex digests"
+        if not isinstance(b.get("note"), str):
+            return "note must be text"
         if b.get("pack_version") != self.pack_version:
             return f"pack_version {b.get('pack_version')} does not match {self.pack_version}"
         return None
@@ -118,19 +149,30 @@ class Hub:
     def _check_approval(self, b: dict) -> str | None:
         if set(b) - APP_FIELDS:
             return f"unexpected fields {sorted(set(b) - APP_FIELDS)}"
-        if b.get("approved_status") not in APPROVABLE_STATES:
+        missing = APP_FIELDS - set(b)
+        if missing:
+            return f"missing fields {sorted(missing)}"
+        if not self._valid_common_fields(b):
+            return "event_id, asset_id, origin_key_id and pack_version must be text"
+        if not isinstance(b.get("approved_status"), str) or b["approved_status"] not in APPROVABLE_STATES:
             return "approved_status must be VERIFIED_OPEN, VERIFIED_CLOSED or RESTRICTED"
-        if not b.get("rationale"):
+        if not isinstance(b.get("rationale"), str) or not b["rationale"].strip():
             return "rationale required for approval"
-        if b.get("source_class") not in SOURCE_CLASSES:
+        if not isinstance(b.get("source_class"), str) or b["source_class"] not in SOURCE_CLASSES:
             return "source_class invalid"
         if b.get("pack_version") != self.pack_version:
             return f"pack_version {b.get('pack_version')} does not match {self.pack_version}"
         try:
-            datetime.fromisoformat(b["approved_at"])
+            approved_at = datetime.fromisoformat(b["approved_at"])
         except (KeyError, TypeError, ValueError):
             return "approved_at must be ISO 8601"
+        if approved_at.utcoffset() is None:
+            return "approved_at must include a timezone"
         return None
+
+    def _valid_common_fields(self, body: dict) -> bool:
+        return all(isinstance(body.get(field), str) and body[field]
+                   for field in ("event_id", "asset_id", "origin_key_id", "pack_version"))
 
     # ------------------------------------------------------------ views
     def events(self, kind: str | None = None) -> list[dict]:

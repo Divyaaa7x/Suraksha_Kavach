@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 from kavach.api import MAX_API_BODY_BYTES, create_app
 from kavach.pack import PackError, demo_signing_key, load_pack
-from kavach.signing import sign_body
+from kavach.signing import TrustEntry, TrustRegistry, sign_body
 
 ROOT = Path(__file__).resolve().parents[1]
 PACK = ROOT / "data" / "packs" / "kavach-demo-synthetic"
@@ -123,6 +123,13 @@ def test_unknown_key_rejected(client):
     assert client.post("/v1/events", json=e).json()["status"] == "rejected"
 
 
+def test_origin_identity_must_match_the_signing_key(client):
+    body = {k: v for k, v in obs().items() if k not in ("signature", "key_id")}
+    body["origin_key_id"] = "demo-supervisor-01"
+    response = client.post("/v1/events", json=signed(body, "demo-responder-01"))
+    assert response.json()["status"] == "rejected"
+
+
 def test_responder_cannot_approve(client):
     assert client.post("/v1/approvals", json=approval(key="demo-responder-01")).json()["status"] == "rejected"
 
@@ -136,6 +143,63 @@ def test_oversize_payload_rejected(client):
 
 def test_unknown_asset_rejected(client):
     assert client.post("/v1/events", json=obs(asset="NOT-IN-PACK")).json()["status"] == "rejected"
+
+
+def test_malformed_signed_observation_is_rejected_without_server_error(client):
+    body = {k: v for k, v in obs().items() if k not in ("signature", "key_id")}
+    body["asset_id"] = {"unhashable": "value"}
+    response = client.post("/v1/events", json=signed(body, "demo-responder-01"))
+    assert response.status_code == 200
+    assert response.json()["status"] == "rejected"
+
+
+def test_observer_cannot_claim_unverified_official_source_class(client):
+    body = {k: v for k, v in obs().items() if k not in ("signature", "key_id")}
+    body["source_class"] = "OFFICIAL"
+    response = client.post("/v1/events", json=signed(body, "demo-responder-01"))
+    assert response.json()["status"] == "rejected"
+
+
+@pytest.mark.parametrize(("field", "value"), [
+    ("observation_type", []),
+    ("source_class", {}),
+])
+def test_untrusted_observation_types_are_rejected_as_client_errors(client, field, value):
+    body = {k: v for k, v in obs().items() if k not in ("signature", "key_id")}
+    body[field] = value
+    response = client.post("/v1/events", json=signed(body, "demo-responder-01"))
+    assert response.status_code == 200
+    assert response.json()["status"] == "rejected"
+
+
+def test_untrusted_approval_type_is_rejected_as_client_error(client):
+    body = {k: v for k, v in approval().items() if k not in ("signature", "key_id")}
+    body["approved_status"] = []
+    response = client.post("/v1/approvals", json=signed(body, "demo-supervisor-01"))
+    assert response.status_code == 200
+    assert response.json()["status"] == "rejected"
+
+
+@pytest.mark.parametrize("latitude", [float("nan"), 10**1000, True])
+def test_nonfinite_or_non_numeric_coordinates_are_rejected(client, latitude):
+    body = {k: v for k, v in obs().items() if k not in ("signature", "key_id")}
+    body["position"]["lat"] = latitude
+    response = client.post("/v1/events", content=json.dumps(signed(body, "demo-responder-01"), allow_nan=True),
+                           headers={"Content-Type": "application/json"})
+    assert response.status_code == 200
+    assert response.json()["status"] == "rejected"
+
+
+def test_trust_registry_enforces_asset_scope():
+    key = demo_signing_key("demo-responder-01")
+    trust = TrustRegistry([TrustEntry(
+        "scoped", key.verify_key.encode().hex(), "field_responder", "2030-01-01T00:00:00+00:00", scope="C1"
+    )])
+    body = {"asset_id": "C1"}
+    signature = sign_body(body, key)
+    assert trust.verify(body, signature, "scoped", None, asset_id="C1")[0]
+    ok, reason = trust.verify(body, signature, "scoped", None, asset_id="C2")
+    assert not ok and "scope" in reason
 
 
 def test_supervisor_approval_recomputes_route_and_audit_survives(client):

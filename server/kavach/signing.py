@@ -46,18 +46,30 @@ class TrustRegistry:
         return self._entries.get(key_id)
 
     def verify(self, body: dict, signature_hex: str, key_id: str, required_role: str | None,
-               at: datetime | None = None) -> tuple[bool, str]:
+               at: datetime | None = None, asset_id: str | None = None) -> tuple[bool, str]:
+        if not isinstance(body, dict) or not isinstance(signature_hex, str) or not isinstance(key_id, str):
+            return False, "invalid signature envelope"
         entry = self.get(key_id)
         if entry is None:
             return False, "unknown key id"
         at = at or datetime.now(timezone.utc)
-        if at > datetime.fromisoformat(entry.expires_at):
+        if at.utcoffset() is None:
+            return False, "verification time must include a timezone"
+        try:
+            expires_at = datetime.fromisoformat(entry.expires_at)
+        except (TypeError, ValueError):
+            return False, "key expiry invalid"
+        if expires_at.utcoffset() is None:
+            return False, "key expiry must include a timezone"
+        if at > expires_at:
             return False, "key expired"
+        if entry.scope != "*" and asset_id != entry.scope:
+            return False, "key not scoped for this asset"
         if required_role and entry.role != required_role:
             return False, f"role {entry.role} not permitted (need {required_role})"
         try:
             VerifyKey(bytes.fromhex(entry.public_key_hex)).verify(canonical_bytes(body), bytes.fromhex(signature_hex))
-        except (BadSignatureError, ValueError):
+        except (BadSignatureError, TypeError, ValueError):
             return False, "bad signature"
         return True, "ok"
 
