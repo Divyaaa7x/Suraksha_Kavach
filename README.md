@@ -4,11 +4,11 @@ Offline-first, human-approved decision support for flood-related road access in 
 
 ## Current implementation
 
-- **Android field app:** Compose screens for readiness, a pan/zoom India states overview, detailed offline OSM road map for Medak/Kamareddy, reports, route comparison, isolation/inspection analysis, private-LAN hub sync, Nearby Connections, and event audit. The app verifies its signed pack before showing data. No ML model is required.
+- **Android field app:** Compose screens for readiness, a pan/zoom India states overview, a statewide offline Telangana road map with waterways, settlements, facilities and mapped administrative boundaries, reports, route comparison, isolation/inspection analysis, private-LAN hub sync, Nearby Connections, and event audit. The app verifies its signed pack and map before showing data. No ML model is required.
 - **Coordinator dashboard:** FastAPI dashboard/API with a local SQLite append-only event store, field-report review, route comparison, an India reference overview, and the same local road-detail map. It runs without external map tiles or other web assets.
 - **Decision engine:** A* route candidates, strict and warning policies, settlement reachability, crossing criticality, inspection ranking, conflict handling, and explicit no-route results.
 - **Evidence handling:** Ed25519-signed observations and approvals, offline trust registry, immutable events, duplicate/replay rejection, and signed pack/hash validation.
-- **Map pack:** A bounded OpenStreetMap extract for Medak/Kamareddy plus Natural Earth state/UT reference boundaries for the India overview. Only the Telangana extract has detailed routable roads; the national overview is not a road graph. Every crossing starts `UNKNOWN`; OSM tags do not establish passability.
+- **Map pack:** The India overview uses Natural Earth reference boundaries. Telangana detail is drawn from a spatially indexed OpenStreetMap Southern Zone snapshot, including 532,186 mapped road ways with Telangana nodes, nearby border context, waterways, places/facilities and available administrative boundary ways. Coverage reflects the source mapping and is not a field survey or a guarantee that every road is present. The routable graph remains the Medak/Kamareddy pilot; statewide map display does not imply statewide routing. Every crossing in that route graph starts `UNKNOWN`; OSM tags do not establish passability.
 - **Synthetic fixture:** A small invented graph used for deterministic golden tests and clearly labelled demo flows.
 
 ## Important limits
@@ -38,7 +38,17 @@ The Android project and 22 Kotlin unit tests build successfully with Gradle 8.11
 
 ## Rebuild the checked-in OSM pack
 
-The source extract is `data/raw/osm-medak-kamareddy-2026-11-19.json` (OSM/ODbL). The India overview snapshot is `data/raw/india-admin1-overview.json`; `scripts/build_india_overview.py` refreshes it from a hash-pinned Natural Earth source. Rebuild the OSM pack with:
+The route graph source is `data/raw/osm-medak-kamareddy-2026-11-19.json` (OSM/ODbL). The India overview snapshot is `data/raw/india-admin1-overview.json`; `scripts/build_india_overview.py` refreshes it from a hash-pinned Natural Earth source. The Telangana display database is built from the [Geofabrik Southern Zone OSM extract](https://download.geofabrik.de/asia/india/southern-zone.html) and is packaged compressed in the Android assets. To rebuild it, download that PBF into `data/raw/southern-zone-latest.osm.pbf`, install the data-build requirements, then run:
+
+```powershell
+python -m pip install -r server/requirements.txt osmium shapely
+python scripts/build_telangana_map.py
+python scripts/build_osm_pack.py
+```
+
+The PBF itself is a build input and is not checked in. The generated database records the PBF timestamp and SHA-256; the compressed map asset is checked against metadata covered by the signed pack. First launch verifies and extracts the 158 MB database to app-private storage. OpenStreetMap contributors are credited in-app under ODbL 1.0. Administrative boundaries use OSM where mapped; the Telangana state outline in the overview is Natural Earth reference geometry.
+
+If the map database has already been generated, rebuild the signed pack and Android assets with:
 
 ```powershell
 python scripts/build_osm_pack.py

@@ -7,12 +7,17 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -36,6 +41,8 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import org.kavach.graph.RoadGraph
 import org.kavach.graph.StatusView
 import org.kavach.graph.Status
@@ -59,7 +66,7 @@ private class Projection(val minLat: Double, val maxLat: Double, val minLon: Dou
 }
 
 private class Geometry(
-    val roads: Path,
+    val roads: List<Pair<Int, Path>>,
     val crossings: List<Pair<String, Path>>,      // crossing id -> its segments
     val water: List<Pair<String, Path>>,          // kind -> line
     val settlements: List<Pair<Offset, String>>,
@@ -68,7 +75,7 @@ private class Geometry(
 )
 
 private fun buildGeometry(graph: RoadGraph, features: List<MapFeature>, p: Projection): Geometry {
-    val roads = Path()
+    val roads = LinkedHashMap<Int, Path>()
     val byCrossing = LinkedHashMap<String, Path>()
     val mids = HashMap<String, Offset>()
     for (e in graph.edges.values) {
@@ -78,7 +85,13 @@ private fun buildGeometry(graph: RoadGraph, features: List<MapFeature>, p: Proje
         val pb = p.at(b.lat, b.lon)
         val cid = e.crossingId
         if (cid == null) {
-            roads.moveTo(pa.x, pa.y); roads.lineTo(pb.x, pb.y)
+            val roadClass = when {
+                e.speedKmh >= 50.0 -> 2 // primary roads
+                e.speedKmh >= 30.0 -> 1 // secondary roads
+                else -> 0               // local roads
+            }
+            val path = roads.getOrPut(roadClass) { Path() }
+            path.moveTo(pa.x, pa.y); path.lineTo(pb.x, pb.y)
         } else {
             val path = byCrossing.getOrPut(cid) { Path() }
             path.moveTo(pa.x, pa.y); path.lineTo(pb.x, pb.y)
@@ -98,7 +111,7 @@ private fun buildGeometry(graph: RoadGraph, features: List<MapFeature>, p: Proje
         .map { p.at(it.lat, it.lon) to it.name }
     val facilities = graph.nodes.values.filter { it.kind == "facility" }
         .map { p.at(it.lat, it.lon) to it.name }
-    return Geometry(roads, byCrossing.toList(), water, settlements, facilities, mids)
+    return Geometry(roads.toList(), byCrossing.toList(), water, settlements, facilities, mids)
 }
 
 @Composable
@@ -109,6 +122,7 @@ fun RealMap(
     selected: String?,
     onSelect: (String?) -> Unit,
     highlightedEdges: Set<String> = emptySet(),
+    mapHeight: androidx.compose.ui.unit.Dp = 480.dp,
 ) {
     val p = remember(graph) {
         val lats = graph.nodes.values.map { it.lat }
@@ -133,9 +147,10 @@ fun RealMap(
     var size by remember { mutableStateOf(IntSize.Zero) }
     var scale by remember { mutableStateOf(0f) }        // px per projected unit; 0 = not fitted yet
     var offset by remember { mutableStateOf(Offset.Zero) }
+    var resetVersion by remember { mutableIntStateOf(0) }
     val density = LocalDensity.current
 
-    LaunchedEffect(graph, highlightedEdges, size) {
+    LaunchedEffect(graph, highlightedEdges, size, resetVersion) {
         if (highlightedEdges.isEmpty() || size.width == 0 || size.height == 0) return@LaunchedEffect
         val points = highlightedEdges.mapNotNull { id ->
             val edge = graph.edges[id] ?: return@mapNotNull null
@@ -156,11 +171,12 @@ fun RealMap(
     }
 
     Box(
-        Modifier.fillMaxWidth().height(420.dp)
+        Modifier.fillMaxWidth().height(mapHeight)
             .onSizeChanged { size = it }
-            .background(Color(0xFFEEF1EE))
+            .background(Color(0xFFEAF0E8))
             .pointerInput(graph) {
                 detectTransformGestures { centroid, pan, zoom, _ ->
+                    if (scale <= 0f) return@detectTransformGestures
                     val newScale = (scale * zoom).coerceIn(size.width / W * 0.5f, 200f)
                     val k = newScale / scale
                     offset = centroid - (centroid - offset) * k + pan
@@ -186,7 +202,7 @@ fun RealMap(
             scale = fit
             offset = Offset((size.width - W * fit) / 2f, (size.height - p.h * fit) / 2f)
         }
-        Canvas(Modifier.fillMaxWidth().height(420.dp)) {
+        Canvas(Modifier.fillMaxSize()) {
             if (scale == 0f) return@Canvas
             clipRect {
                 withTransform({
@@ -194,11 +210,22 @@ fun RealMap(
                     scale(scale, scale, pivot = Offset.Zero)
                 }) {
                     val lw = 1f / scale
-                    // Water first, under roads.
+                    // Water sits below the road hierarchy.
                     for ((kind, path) in geo.water) {
-                        drawPath(path, waterColor(kind), style = Stroke(width = (if (kind == "river") 3f else 1.5f) * lw, cap = StrokeCap.Round))
+                        drawPath(path, waterColor(kind), style = Stroke(
+                            width = (if (kind == "river") 3.5f else 2f) * lw,
+                            cap = StrokeCap.Round,
+                        ))
                     }
-                    drawPath(geo.roads, Color(0xFF8A929C), style = Stroke(width = lw))
+                    for ((roadClass, path) in geo.roads) {
+                        val (casing, fill, casingWidth, roadWidth) = when (roadClass) {
+                            2 -> Quad(Color(0xFFD1B88C), Color(0xFFFFE1A7), 8.5f, 5.2f)
+                            1 -> Quad(Color(0xFFC9CEC2), Color(0xFFFFFEFA), 5.5f, 3.5f)
+                            else -> Quad(Color(0xFFD1D5CC), Color(0xFFFDFEFB), 3.2f, 1.8f)
+                        }
+                        drawPath(path, casing, style = Stroke(width = casingWidth * lw, cap = StrokeCap.Round))
+                        drawPath(path, fill, style = Stroke(width = roadWidth * lw, cap = StrokeCap.Round))
+                    }
                     for ((cid, path) in geo.crossings) {
                         val st = statuses[cid]?.status ?: Status.UNKNOWN
                         val w = (if (cid == selected) 7f else 4f) * lw
@@ -228,7 +255,38 @@ fun RealMap(
             modifier = Modifier.align(Alignment.BottomEnd).padding(6.dp)
                 .background(Color(0xDDFFFFFF)).padding(horizontal = 4.dp),
         )
+        Column(
+            Modifier.align(Alignment.TopEnd).padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            FilledTonalIconButton(
+                onClick = { zoomAtCenter(1.35f, size, scale, offset) { s, o -> scale = s; offset = o } },
+                modifier = Modifier.semantics { contentDescription = "Zoom in" },
+            ) { Text("+") }
+            FilledTonalIconButton(
+                onClick = { zoomAtCenter(0.74f, size, scale, offset) { s, o -> scale = s; offset = o } },
+                modifier = Modifier.semantics { contentDescription = "Zoom out" },
+            ) { Text("−") }
+            FilledTonalIconButton(
+                onClick = { resetVersion++; scale = 0f; offset = Offset.Zero },
+                modifier = Modifier.semantics { contentDescription = "Reset map view" },
+            ) { Text("◎") }
+        }
     }
+}
+
+private fun zoomAtCenter(
+    factor: Float,
+    size: IntSize,
+    scale: Float,
+    offset: Offset,
+    update: (Float, Offset) -> Unit,
+) {
+    if (scale <= 0f || size.width == 0 || size.height == 0) return
+    val center = Offset(size.width / 2f, size.height / 2f)
+    val nextScale = (scale * factor).coerceIn(size.width / W * 0.5f, 200f)
+    val ratio = nextScale / scale
+    update(nextScale, center - (center - offset) * ratio)
 }
 
 private fun DrawScope.drawLabels(geo: Geometry, measurer: TextMeasurer, scale: Float, offset: Offset) {
@@ -246,8 +304,10 @@ private fun DrawScope.drawLabels(geo: Geometry, measurer: TextMeasurer, scale: F
 }
 
 private fun waterColor(kind: String): Color = when (kind) {
-    "river" -> Color(0xFF4A90C2)
-    "canal" -> Color(0xFF3F7FB0)
-    "stream" -> Color(0xFF7FB4D9)
-    else -> Color(0xFF9CC3E0)
+    "river" -> Color(0xFF78B5D0)
+    "canal" -> Color(0xFF69A9C8)
+    "stream" -> Color(0xFFA1CBDA)
+    else -> Color(0xFFB7D7E0)
 }
+
+private data class Quad(val first: Color, val second: Color, val third: Float, val fourth: Float)

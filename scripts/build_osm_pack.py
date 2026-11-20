@@ -18,8 +18,11 @@ Attribution: (c) OpenStreetMap contributors, ODbL 1.0. Keep it on every screen t
 from __future__ import annotations
 
 import datetime as dt
+import gzip
+import hashlib
 import json
 import math
+import os
 import shutil
 import sys
 from collections import defaultdict
@@ -34,7 +37,9 @@ from build_india_overview import OUTPUT as INDIA_OVERVIEW  # noqa: E402
 
 RAW = ROOT / "data" / "raw" / "osm-medak-kamareddy-2026-11-19.json"
 OUT = ROOT / "data" / "packs" / "kavach-osm-medak-kamareddy"
-PACK_VERSION = "OSM-MK-2026-11-19"
+PACK_VERSION = "OSM-MK-2026-11-20"
+TELANGANA_MAP = Path(os.environ.get("KAVACH_TELANGANA_MAP_DB", ROOT / "data" / "raw" / "telangana-map.sqlite"))
+ANDROID_MAP = ROOT / "android" / "app" / "src" / "main" / "assets" / "maps" / "telangana-map.mapdata"
 LINK_RADIUS_M = 1500.0
 SPUR_SPEED_KMH = 20.0
 ROAD_SPEED_KMH = {
@@ -50,6 +55,9 @@ LICENSES = """REAL DATA PACK, built from OpenStreetMap.
 (c) OpenStreetMap contributors. Data is available under the Open Database License (ODbL) 1.0:
 https://www.openstreetmap.org/copyright  — keep this attribution with any map or export.
 Extract: Overpass API, bbox 17.95,78.05 to 18.45,78.55 (Medak / Kamareddy area), retrieved 2026-11-19.
+Offline display map: Southern Zone Geofabrik extract downloaded 2026-11-20 (OSM data through
+2026-11-18), spatially indexed to Telangana and nearby border context. The statewide display map
+does not expand the signed routing graph. Source download: https://download.geofabrik.de/asia/india/southern-zone.html
 Crossing tags (bridge=*, culvert=*, ford=*) are mapping data, not inspection results.
 Nothing in this pack was produced by a field inspection. Every crossing starts as UNKNOWN.
 
@@ -66,6 +74,14 @@ def haversine_m(lat1, lon1, lat2, lon2) -> float:
     dl = math.radians(lon2 - lon1)
     h = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
     return 2 * r * math.asin(math.sqrt(h))
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for block in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 class GridIndex:
@@ -239,9 +255,26 @@ def main() -> None:
     crit = criticality(graph_from_dict(graph))
     crit_json = json.dumps(crit, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
+    if not TELANGANA_MAP.is_file():
+        raise FileNotFoundError(
+            f"{TELANGANA_MAP} missing; build it with `python scripts/build_telangana_map.py <south-zone.osm.pbf>`"
+        )
+    ANDROID_MAP.parent.mkdir(parents=True, exist_ok=True)
+    with TELANGANA_MAP.open("rb") as source, ANDROID_MAP.open("wb") as target:
+        with gzip.GzipFile(filename="", mode="wb", fileobj=target, mtime=0, compresslevel=6) as compressed:
+            shutil.copyfileobj(source, compressed, length=1024 * 1024)
+    map_metadata = json.dumps({
+        "schema": 1,
+        "archive_sha256": sha256_file(ANDROID_MAP),
+        "database_sha256": sha256_file(TELANGANA_MAP),
+        "database_bytes": TELANGANA_MAP.stat().st_size,
+        "archive_bytes": ANDROID_MAP.stat().st_size,
+        "source": "OpenStreetMap South India Geofabrik extract, ODbL",
+    }, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
     out = build_pack(OUT, graph, policy, pack_version=PACK_VERSION, licenses_text=LICENSES,
                      extra_files={"features.json": features_json, "criticality.json": crit_json,
-                                  "india_admin1.json": india_overview},
+                                  "india_admin1.json": india_overview, "offline_map.json": map_metadata},
                      source_class="OSM")
     # The hub reads data/packs while the APK reads its own assets. Keep both copies on
     # the exact same signed bytes whenever the source pack is rebuilt.

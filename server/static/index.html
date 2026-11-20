@@ -50,17 +50,18 @@
   <h2>India overview · state and union territory reference boundaries</h2>
   <canvas id="india" aria-label="Offline reference map of Indian states and union territories"></canvas>
   <label>Selected state or union territory <select id="indiaState"></select></label>
-  <p class="muted">Reference boundaries only; no nationwide detailed road routing. Detailed OSM roads are available for Medak / Kamareddy, Telangana.</p>
+  <p class="muted">India is an overview. Telangana includes offline roads, waterways, places and district boundaries; route analysis and crossing status remain limited to Medak / Kamareddy.</p>
 </section>
 <main>
   <section class="card">
-    <h2>Detailed road network · Medak / Kamareddy, Telangana</h2>
+    <h2>Telangana · offline map</h2>
     <div id="mapwrap">
       <canvas id="map" aria-label="Road network with crossing status; drag to pan, wheel to zoom"></canvas>
       <div class="attrib">© OpenStreetMap contributors · ODbL</div>
     </div>
     <div class="legend" id="legend"></div>
-    <div class="detail" id="detail">Tap a crossing (thick line) to see its status and what depends on it.</div>
+    <div class="detail" id="detail">Tap a marked pilot crossing to see its status and what depends on it.</div>
+    <p class="muted" id="mapSource" aria-live="polite">Loading offline Telangana map…</p>
     <p class="muted" id="gver"></p>
   </section>
 
@@ -105,7 +106,7 @@ const ROAD_W = { motorway:3, trunk:3, primary:2.5, secondary:2, tertiary:1.6, un
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-let G = null, F = null, INDIA = null, selectedState = 'IN-TG', ST = {}, view = {x:0, y:0, k:1}, bounds, roadPath = null, crossEdges = [], selected = null, routeEdges = new Set();
+let G = null, F = null, INDIA = null, selectedState = 'IN-TG', ST = {}, view = {x:0, y:0, k:1}, bounds, roadPath = null, crossEdges = [], selected = null, routeEdges = new Set(), offlineMap = null, mapTimer = null, mapRequest = 0;
 const canvas = $('map'), ctx = canvas.getContext('2d');
 const indiaCanvas = $('india'), indiaCtx = indiaCanvas.getContext('2d');
 
@@ -122,11 +123,17 @@ function toXY(lat, lon) {
   return [ (lon - cx) * sx, -(lat - cy) ];
 }
 
+function stateBounds() {
+  const area = INDIA?.features.find(a => a.code === selectedState), coords = (area?.rings || []).flat();
+  return coords.length ? {minLo:Math.min(...coords.map(p=>p[0])),maxLo:Math.max(...coords.map(p=>p[0])),minLa:Math.min(...coords.map(p=>p[1])),maxLa:Math.max(...coords.map(p=>p[1]))} : bboxOf(G.nodes);
+}
+
 function fit() {
   const w = canvas.clientWidth, h = canvas.clientHeight;
   const [x0,y0] = toXY(bounds.maxLa, bounds.minLo), [x1,y1] = toXY(bounds.minLa, bounds.maxLo);
   const k = Math.min(w / (x1 - x0), h / (y1 - y0)) * 0.95;
   view = { k, x: w/2 - ((x0+x1)/2) * k, y: h/2 - ((y0+y1)/2) * k };
+  scheduleOfflineMap();
 }
 
 function focusRoute(edgeIds) {
@@ -156,8 +163,6 @@ function buildRoadPaths() {
     if (!a || !b) continue;
     if (e.crossing_id) {
       crossEdges.push(e);
-    } else {
-      roadPath.moveTo(a[0], a[1]); roadPath.lineTo(b[0], b[1]);
     }
   }
   roadPath.__width = 1;
@@ -170,6 +175,20 @@ function draw() {
   ctx.clearRect(0, 0, w, h);
   ctx.save();
   ctx.translate(view.x, view.y); ctx.scale(view.k, view.k);
+  if (offlineMap && selectedState === 'IN-TG') {
+    const path = (items,color,width,dash=[]) => {
+      ctx.beginPath();
+      for (const item of items) item.coords.forEach(([lon,lat],i)=>{const [x,y]=toXY(lat,lon);i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
+      ctx.strokeStyle=color;ctx.lineWidth=width/view.k;ctx.setLineDash(dash.map(v=>v/view.k));ctx.stroke();ctx.setLineDash([]);
+    };
+    path(offlineMap.waterways,'#8fc6df',2.2);
+    path(offlineMap.boundaries.filter(b=>b.level==='4'),'#668777',1.7);
+    path(offlineMap.boundaries.filter(b=>b.level!=='4'),'#b7c5bc',.8,[4,3]);
+    path(offlineMap.roads.filter(r=>!['motorway','trunk','primary'].includes(r.kind)),'#c5c4be',.8);
+    path(offlineMap.roads.filter(r=>['motorway','trunk','primary'].includes(r.kind)),'#fffdf8',3.2);
+    path(offlineMap.roads.filter(r=>['motorway','trunk','primary'].includes(r.kind)),'#e0a85c',1.15);
+    for(const p of offlineMap.places){const [x,y]=toXY(p.lat,p.lon),major=['city','town','district'].includes(p.kind);ctx.beginPath();ctx.arc(x,y,(major?2.8:1.5)/view.k,0,Math.PI*2);ctx.fillStyle=major?'#fffdf8':'#64766b';ctx.fill();if(major&&view.k>360){ctx.font=`${11/view.k}px system-ui`;ctx.fillStyle='#33443a';ctx.fillText(p.name,x+5/view.k,y-4/view.k);}}
+  }
   // Water first, under the roads.
   for (const f of (F ? F.features : [])) {
     ctx.beginPath();
@@ -250,7 +269,7 @@ function setIndiaOverview(data) {
   INDIA = data;
   $('indiaState').innerHTML = data.features.map(a => `<option value="${esc(a.code)}">${esc(a.name)}</option>`).join('');
   $('indiaState').value = selectedState;
-  $('indiaState').addEventListener('change', () => { selectedState = $('indiaState').value; drawIndia(); });
+  $('indiaState').addEventListener('change', () => { selectedState = $('indiaState').value; bounds=stateBounds(); fit(); drawIndia(); draw(); });
   drawIndia();
 }
 
@@ -270,7 +289,7 @@ canvas.addEventListener('wheel', (ev) => {
   const r = canvas.getBoundingClientRect(), px = ev.clientX - r.left, py = ev.clientY - r.top;
   const f = ev.deltaY < 0 ? 1.2 : 1/1.2;
   view.x = px - (px - view.x) * f; view.y = py - (py - view.y) * f; view.k *= f;
-  draw();
+  draw(); scheduleOfflineMap();
 }, { passive: false });
 
 let drag = null, moved = false;
@@ -279,7 +298,7 @@ canvas.addEventListener('pointermove', (ev) => {
   if (!drag) return;
   const dx = ev.clientX - drag.x, dy = ev.clientY - drag.y;
   if (Math.abs(dx) + Math.abs(dy) > 3) moved = true;
-  view.x += dx; view.y += dy; drag = {x: ev.clientX, y: ev.clientY}; draw();
+  view.x += dx; view.y += dy; drag = {x: ev.clientX, y: ev.clientY}; draw(); scheduleOfflineMap();
 });
 canvas.addEventListener('pointerup', (ev) => {
   const wasDrag = moved; drag = null;
@@ -303,6 +322,17 @@ function bboxOf(nodes) {
   let minLa=90,maxLa=-90,minLo=180,maxLo=-180;
   for (const n of nodes) { minLa=Math.min(minLa,n.lat); maxLa=Math.max(maxLa,n.lat); minLo=Math.min(minLo,n.lon); maxLo=Math.max(maxLo,n.lon); }
   return {minLa,maxLa,minLo,maxLo};
+}
+
+function scheduleOfflineMap(){clearTimeout(mapTimer);mapTimer=setTimeout(loadOfflineMap,180);}
+async function loadOfflineMap(){
+  if(selectedState!=='IN-TG'||!INDIA){offlineMap=null;draw();return;}
+  const w=canvas.clientWidth,h=canvas.clientHeight,corners=[[0,0],[w,h]].map(([x,y])=>{const [px,py]=[(x-view.x)/view.k,(y-view.y)/view.k],cy=(bounds.minLa+bounds.maxLa)/2,cx=(bounds.minLo+bounds.maxLo)/2;return[cx+px/Math.cos(cy*Math.PI/180),cy-py];});
+  const west=Math.max(76.9,Math.min(...corners.map(p=>p[0]))),east=Math.min(82.1,Math.max(...corners.map(p=>p[0]))),south=Math.max(15.4,Math.min(...corners.map(p=>p[1]))),north=Math.min(20.4,Math.max(...corners.map(p=>p[1])));
+  if(east<=west||north<=south)return;
+  const zoom=Math.max(6,Math.min(16,Math.round(6+Math.log2(Math.max(view.k,1)/180)))),seq=++mapRequest;
+  try{const q=new URLSearchParams({west,south,east,north,zoom});offlineMap=await j('/v1/offline-map?'+q);if(seq===mapRequest){$('mapSource').textContent=offlineMap.source+' · statewide map';draw();}}
+  catch(err){if(seq===mapRequest){$('mapSource').textContent='Telangana offline map unavailable: '+err.message;draw();}}
 }
 
 async function refreshStatus(scenario) {
@@ -389,7 +419,7 @@ async function init() {
     const hosp = names.find(n => n.kind === 'facility' && /hospital/i.test(n.name)) || names.find(n => n.kind === 'facility'), first = names.find(n => n.kind === 'settlement');
     if (first) $('origin').value = first.node_id;
     if (hosp) $('dest').value = hosp.node_id;
-    bounds = bboxOf(G.nodes);
+    bounds = stateBounds();
     G.nodeXY = {};
     for (const n of G.nodes) G.nodeXY[n.node_id] = toXY(n.lat, n.lon);
     try { F = await j('/v1/features'); } catch (e) { F = {features: []}; }

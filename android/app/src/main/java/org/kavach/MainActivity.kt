@@ -11,7 +11,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.lightColorScheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.material3.Shapes
+import androidx.compose.ui.unit.dp
 import org.kavach.ui.AppScreen
 import org.kavach.ui.KavachViewModel
 
@@ -22,7 +26,19 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            MaterialTheme(colorScheme = lightColorScheme()) {
+            MaterialTheme(
+                colorScheme = lightColorScheme(
+                    primary = Color(0xFF1F6255), onPrimary = Color.White,
+                    secondary = Color(0xFF55786E),
+                    background = Color(0xFFF5F7F5), surface = Color(0xFFFFFFFF),
+                    surfaceVariant = Color(0xFFE9EFEC), onSurface = Color(0xFF17211D),
+                ),
+                shapes = Shapes(
+                    small = RoundedCornerShape(12.dp),
+                    medium = RoundedCornerShape(18.dp),
+                    large = RoundedCornerShape(26.dp),
+                ),
+            ) {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     val locationLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
                         ActivityResultContracts.RequestMultiplePermissions()

@@ -17,15 +17,24 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.animateContentSize
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.ScrollableTabRow
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -41,6 +50,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AddCircle
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Place
 import org.kavach.PackState
 import org.kavach.graph.Policy
 import org.kavach.graph.RoadGraph
@@ -49,7 +64,7 @@ import org.kavach.sync.NearbyRelay
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
 
-private val TABS = listOf("Home", "Map", "Report", "Routes", "Analysis", "Sync", "Audit")
+private val TABS = listOf("Home", "Map", "Report", "Routes", "More")
 
 /** Status colours. Colour is never the only signal: every status also has a text label. */
 fun statusColor(status: String): Color = when (status) {
@@ -83,76 +98,133 @@ fun AppScreen(vm: KavachViewModel, onRequestLocation: () -> Unit, onStartNearby:
 @Composable
 private fun ReadyApp(vm: KavachViewModel, onRequestLocation: () -> Unit, onStartNearby: () -> Unit) {
     var tab by remember { mutableIntStateOf(0) }
+    var moreTab by remember { mutableIntStateOf(0) }
     LaunchedEffect(Unit) { vm.refresh() }
     Column(Modifier.fillMaxSize()) {
-        Banner()
-        ScrollableTabRow(selectedTabIndex = tab, edgePadding = 8.dp) {
-            TABS.forEachIndexed { i, title ->
-                Tab(selected = tab == i, onClick = { tab = i }, text = { Text(title) })
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column {
+                Text("KAVACH", fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp,
+                    color = MaterialTheme.colorScheme.primary)
+                Text("Field support", style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            Text("●  OFFLINE", style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(50))
+                    .padding(horizontal = 12.dp, vertical = 7.dp))
         }
-        val scroll = rememberScrollState()
-        Column(Modifier.fillMaxSize().padding(12.dp).verticalScroll(scroll)) {
-            when (tab) {
-                0 -> HomeScreen(vm)
-                1 -> MapScreen(vm)
-                2 -> ReportScreen(vm, onRequestLocation)
-                3 -> RoutesScreen(vm) {
-                    vm.selectedMapArea = "IN-TG"
-                    vm.showLocalDetail = true
-                    tab = 1
+        HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+        AnimatedContent(
+            targetState = tab,
+            modifier = Modifier.weight(1f),
+            transitionSpec = { fadeIn(tween(170)) togetherWith fadeOut(tween(100)) },
+            label = "primary navigation",
+        ) { destination ->
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
+                when (destination) {
+                    0 -> HomeScreen(vm, onGo = { tab = it })
+                    1 -> MapScreen(vm)
+                    2 -> ReportScreen(vm, onRequestLocation)
+                    3 -> RoutesScreen(vm) {
+                        vm.selectedMapArea = "IN-TG"
+                        vm.showLocalDetail = true
+                        tab = 1
+                    }
+                    else -> MoreScreen(vm, moreTab, onSelect = { moreTab = it }, onStartNearby = onStartNearby)
                 }
-                4 -> AnalysisScreen(vm)
-                5 -> SyncScreen(vm, onStartNearby)
-                else -> AuditScreen(vm)
             }
         }
-    }
-}
-
-@Composable
-private fun Banner() {
-    Box(Modifier.fillMaxWidth().background(Color(0xFFFFF3CD)).padding(10.dp)) {
-        Text(
-            "Decision support only. A human approves every access decision. Map data: OpenStreetMap (ODbL). Works offline.",
-            fontSize = 12.sp,
-            color = Color(0xFF533F03),
-        )
+        NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+            val icons = listOf(Icons.Filled.Home, Icons.Filled.Place, Icons.Filled.AddCircle,
+                Icons.AutoMirrored.Filled.ArrowForward, Icons.Filled.MoreVert)
+            TABS.forEachIndexed { i, title ->
+                NavigationBarItem(
+                    selected = tab == i,
+                    onClick = { tab = i },
+                    icon = { Icon(icons[i], contentDescription = null) },
+                    label = { Text(title) },
+                    alwaysShowLabel = true,
+                )
+            }
+        }
     }
 }
 
 @Composable
 private fun Section(title: String, content: @Composable () -> Unit) {
-    Card(Modifier.fillMaxWidth().padding(vertical = 6.dp), colors = CardDefaults.cardColors()) {
+    Card(
+        Modifier.fillMaxWidth().padding(vertical = 6.dp).animateContentSize(tween(180)),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    ) {
         Column(Modifier.padding(12.dp)) {
-            Text(title, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+            Text(title, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium)
             Column(Modifier.padding(top = 6.dp)) { content() }
         }
     }
 }
 
 @Composable
-private fun HomeScreen(vm: KavachViewModel) {
+private fun HomeScreen(vm: KavachViewModel, onGo: (Int) -> Unit) {
     val graph = vm.graph() ?: return
     val (packVersion, packCreated) = vm.packInfo()
-    val crossingCount = graph.crossings.size
-    Section("Readiness") {
-        Text("Pack: $packVersion")
-        Text("Pack created (UTC): $packCreated")
-        Text("Graph: ${graph.version}")
-        Text("Road network: ${graph.edges.size} segments, $crossingCount bridges/culverts/fords (from OSM tags)")
-        Text("Role on this device: field responder (demo key). Approvals happen on the hub.")
-        Text("Events on this phone: ${vm.counts.first} reports, ${vm.counts.second} approvals")
+    Section("Ready for the field") {
+        Text("Offline map available", color = MaterialTheme.colorScheme.primary,
+            fontWeight = FontWeight.SemiBold)
+        Text("Route graph · ${graph.edges.size} segments · ${graph.crossings.size} crossings")
+        Text("Map updated ${ageText(packCreated)} ago")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 10.dp)) {
+            Button(onClick = { onGo(1) }) { Text("Open map") }
+            OutlinedButton(onClick = { onGo(2) }) { Text("Report") }
+        }
     }
-    Section("Data age") {
-        Text("Pack age: ${ageText(packCreated)}. Map data is from OpenStreetMap; it is not a live road survey.")
-    }
+    val counts = vm.statuses.values.groupingBy { it.status }.eachCount()
     Section("Crossing status") {
-        Text("Every crossing starts UNKNOWN. Only a report or an authorised approval changes it.",
-            fontSize = 13.sp)
-        val counts = vm.statuses.values.groupingBy { it.status }.eachCount()
-        counts.forEach { (st, n) -> Text("$st: $n", color = statusColor(st)) }
-        if (counts.isEmpty()) Text("Loading statuses…")
+        Text("${counts[Status.UNKNOWN] ?: graph.crossings.size} awaiting field verification",
+            color = statusColor(Status.UNKNOWN), fontWeight = FontWeight.SemiBold)
+        Text("OSM bridge and ford tags are not safety checks.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        val other = counts.filterKeys { it != Status.UNKNOWN }
+        if (other.isNotEmpty()) {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(other.entries.toList()) { (status, count) ->
+                    Text("$status · $count", color = statusColor(status),
+                        style = MaterialTheme.typography.labelMedium)
+                }
+            }
+        }
+    }
+    Section("This device") {
+        Text("Field responder · demo key", style = MaterialTheme.typography.bodyMedium)
+        Text("${vm.counts.first} reports · ${vm.counts.second} approvals on this phone",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Pack $packVersion", style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+    Text("Decision support only · human review required",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 8.dp, vertical = 12.dp))
+}
+
+@Composable
+private fun MoreScreen(vm: KavachViewModel, selected: Int, onSelect: (Int) -> Unit,
+                      onStartNearby: () -> Unit) {
+    val labels = listOf("Analysis", "Sync", "Audit")
+    Section("Tools") {
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(labels.indices.toList()) { i ->
+                FilterChip(selected = selected == i, onClick = { onSelect(i) }, label = { Text(labels[i]) })
+            }
+        }
+    }
+    when (selected) {
+        0 -> AnalysisScreen(vm)
+        1 -> SyncScreen(vm, onStartNearby)
+        else -> AuditScreen(vm)
     }
 }
 
@@ -173,44 +245,55 @@ private fun MapScreen(vm: KavachViewModel) {
     val areas = vm.indiaAreas()
     val selectedArea = areas.firstOrNull { it.code == vm.selectedMapArea }
     if (!vm.showLocalDetail) {
-        Section("India offline overview · ${areas.size} states and union territories") {
-            IndiaOverviewMap(areas, vm.selectedMapArea) { vm.selectedMapArea = it }
+        Section("India · ${areas.size} states and union territories") {
+            IndiaOverviewMap(areas, vm.selectedMapArea, onSelect = { vm.selectedMapArea = it })
             if (areas.isNotEmpty()) {
-                NodePicker("Select a state or union territory", areas.map { it.code to it.name },
+                NodePicker("State or UT", areas.map { it.code to it.name },
                     vm.selectedMapArea) { vm.selectedMapArea = it }
             }
-            Text(
-                if (selectedArea?.code == "IN-TG")
-                    "Detailed OSM roads are installed for Medak / Kamareddy, Telangana."
-                else "${selectedArea?.name ?: "This area"} has overview boundaries only; no detailed road pack is installed.",
-                fontSize = 13.sp,
-            )
+            Text(if (selectedArea?.code == "IN-TG") "Telangana offline road map · routes for Medak and Kamareddy"
+                else "Reference boundary only · no local road map installed",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (selectedArea?.code == "IN-TG") {
-                Button(onClick = { vm.showLocalDetail = true }, modifier = Modifier.padding(top = 8.dp)) {
-                    Text("Open Telangana road detail")
+                Button(onClick = { vm.showLocalDetail = true }, modifier = Modifier.padding(top = 10.dp)) {
+                    Text("Open Telangana map")
                 }
             }
         }
     } else {
-        Section("Detailed offline road map · Medak / Kamareddy, Telangana") {
-            OutlinedButton(onClick = { vm.showLocalDetail = false }) { Text("Back to India overview") }
-            RealMap(
-                graph = graph,
-                features = vm.features(),
-                statuses = vm.statuses,
-                selected = vm.selectedCrossing,
-                onSelect = { vm.selectedCrossing = it },
-                highlightedEdges = vm.highlightedRouteEdges,
-            )
-            Text("Pinch to zoom, drag to pan, tap a thick line (bridge, culvert or ford) to inspect it.",
-                fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+        Section("Telangana · offline map") {
+            OutlinedButton(onClick = { vm.showLocalDetail = false }) { Text("India") }
+            val mapDatabase = vm.offlineMapDatabase()
+            val telangana = areas.firstOrNull { it.code == "IN-TG" }
+            if (mapDatabase != null && telangana != null) {
+                TelanganaOfflineMap(
+                    database = mapDatabase,
+                    state = telangana,
+                    graph = graph,
+                    statuses = vm.statuses,
+                    selectedCrossing = vm.selectedCrossing,
+                    highlightedEdges = vm.highlightedRouteEdges,
+                    onSelectCrossing = { vm.selectedCrossing = it },
+                )
+                Text("Pinch to zoom · drag to explore · OSM map",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 6.dp))
+                Text("Route analysis: Medak and Kamareddy",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                RealMap(graph, vm.features(), vm.statuses, vm.selectedCrossing,
+                    onSelect = { vm.selectedCrossing = it }, highlightedEdges = vm.highlightedRouteEdges)
+            }
             if (vm.highlightedRouteEdges.isNotEmpty()) {
                 val matched = vm.highlightedRouteEdges.count { it in graph.edges }
                 Text(
                     if (matched == vm.highlightedRouteEdges.size)
-                        "Teal line with a light outline: the most recently computed candidate route (${matched} segments)."
-                    else "Route map mismatch: $matched of ${vm.highlightedRouteEdges.size} route segments match this map. Recompute before using this view.",
-                    fontSize = 12.sp,
+                        "Candidate route · $matched segments"
+                    else "Map mismatch · $matched of ${vm.highlightedRouteEdges.size} segments",
+                    style = MaterialTheme.typography.labelSmall,
                     color = if (matched == vm.highlightedRouteEdges.size) Color(0xFF00695C) else Color(0xFFB3261E),
                 )
             }
@@ -229,13 +312,15 @@ private fun MapScreen(vm: KavachViewModel) {
                  else "No settlement depends on this crossing alone.", fontSize = 13.sp)
         }
     }
-    Section("Legend") {
-        listOf(Status.UNKNOWN, Status.REPORTED_OPEN, Status.REPORTED_CLOSED, Status.VERIFIED_OPEN,
-            Status.VERIFIED_CLOSED, Status.DISPUTED, Status.STALE, Status.PREDICTED_RISK).forEach {
-            Text(it, color = statusColor(it))
+    if (vm.showLocalDetail) Section("Map key") {
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            items(listOf(Status.UNKNOWN, Status.REPORTED_CLOSED, Status.VERIFIED_OPEN, Status.VERIFIED_CLOSED)) {
+                Text(it.replace("_", " "), color = statusColor(it),
+                    style = MaterialTheme.typography.labelSmall)
+            }
         }
-        Text("Blue lines: rivers, streams and canals. Squares: hospitals and clinics. Rings: settlements.",
-            fontSize = 12.sp)
+        Text("Blue · water   □ facility   ○ settlement", style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -249,8 +334,10 @@ private fun ReportScreen(vm: KavachViewModel, onRequestLocation: () -> Unit) {
     var type by remember { mutableStateOf("CLOSED") }
     var note by remember { mutableStateOf("") }
     val asset = vm.selectedCrossing ?: crossings.firstOrNull() ?: ""
-    Section("New observation (saved as a claim, not verified)") {
-        NodePicker("Crossing (tap one on the Map tab, or choose here)", crossingOptions, asset) {
+    Section("New report") {
+        Text("Saved as an unverified field claim.", style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        NodePicker("Crossing", crossingOptions, asset) {
             vm.selectedCrossing = it
         }
         Text("Observed", Modifier.padding(top = 8.dp))
@@ -261,12 +348,12 @@ private fun ReportScreen(vm: KavachViewModel, onRequestLocation: () -> Unit) {
         }
         OutlinedTextField(
             value = note, onValueChange = { note = it.take(200) },
-            label = { Text("Short note (template text)") }, modifier = Modifier.fillMaxWidth(),
+            label = { Text("Note (optional)") }, modifier = Modifier.fillMaxWidth(),
         )
         val f = vm.fix
         Text(
-            if (f == null) "GPS: no fix yet"
-            else "GPS: ${"%.5f".format(f.lat)}, ${"%.5f".format(f.lon)}, ±${f.accuracyM.toInt()} m, fix ${f.ageS}s old",
+            if (f == null) "Location not added"
+            else "Location · ±${f.accuracyM.toInt()} m · ${f.ageS}s ago",
             Modifier.padding(top = 6.dp),
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 6.dp)) {

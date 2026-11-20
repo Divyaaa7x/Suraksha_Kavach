@@ -4,11 +4,17 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -26,8 +32,11 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.sp
 import org.kavach.pack.IndiaAdminArea
 import kotlin.math.cos
@@ -74,15 +83,24 @@ private fun contains(ring: List<Offset>, point: Offset): Boolean {
 
 /** Offline national context map. State geometry is reference data, not a routable road graph. */
 @Composable
-fun IndiaOverviewMap(areas: List<IndiaAdminArea>, selectedCode: String?, onSelect: (String) -> Unit) {
+fun IndiaOverviewMap(
+    areas: List<IndiaAdminArea>,
+    selectedCode: String?,
+    onSelect: (String) -> Unit,
+    mapHeight: Dp = 360.dp,
+) {
     val geometry = remember(areas) { shapes(areas) }
     val measurer = rememberTextMeasurer()
+    val fillColors = geometry.associate { shape ->
+        val target = if (shape.area.code == selectedCode) Color(0xFFBDDCCF) else Color(0xFFF8FAF8)
+        shape.area.code to animateColorAsState(target, tween(220), label = "selected state").value
+    }
     var size by remember { mutableStateOf(IntSize.Zero) }
     var scale by remember { mutableStateOf(0f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
 
     Box(
-        Modifier.fillMaxWidth().height(460.dp)
+        Modifier.fillMaxWidth().height(mapHeight)
             .background(Color(0xFFEAF0F2))
             .onSizeChanged { size = it }
             .pointerInput(size) {
@@ -111,13 +129,12 @@ fun IndiaOverviewMap(areas: List<IndiaAdminArea>, selectedCode: String?, onSelec
             offset = Offset((size.width - MAP_WIDTH * fit) / 2f,
                 (size.height - MAP_HEIGHT * fit) / 2f)
         }
-        Canvas(Modifier.fillMaxWidth().height(460.dp)) {
+        Canvas(Modifier.fillMaxSize()) {
             if (scale <= 0f) return@Canvas
             withTransform({ translate(offset.x, offset.y); scale(scale, scale, pivot = Offset.Zero) }) {
                 geometry.forEach { shape ->
-                    val fill = if (shape.area.code == selectedCode) Color(0xFFD1E7F2) else Color(0xFFF8FAFB)
-                    drawPath(shape.path, fill)
-                    drawPath(shape.path, Color(0xFF65747D), style = Stroke(width = 1.4f / scale))
+                    drawPath(shape.path, fillColors.getValue(shape.area.code))
+                    drawPath(shape.path, Color(0xFF71857D), style = Stroke(width = 1.25f / scale))
                 }
             }
             if (scale > 1f || selectedCode != null) {
@@ -137,10 +154,41 @@ fun IndiaOverviewMap(areas: List<IndiaAdminArea>, selectedCode: String?, onSelec
             }
         }
         Text(
-            "India state reference · Natural Earth · not an authoritative boundary",
+            "STATE REFERENCE · NATURAL EARTH",
             fontSize = 10.sp,
             modifier = Modifier.align(Alignment.BottomCenter).padding(6.dp)
                 .background(Color(0xDDFFFFFF)).padding(horizontal = 5.dp, vertical = 2.dp),
         )
+        Column(
+            Modifier.align(Alignment.TopEnd).padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            FilledTonalIconButton(
+                onClick = { zoomIndia(1.35f, size, scale, offset) { s, o -> scale = s; offset = o } },
+                modifier = Modifier.semantics { contentDescription = "Zoom in on India map" },
+            ) { Text("+") }
+            FilledTonalIconButton(
+                onClick = { zoomIndia(0.74f, size, scale, offset) { s, o -> scale = s; offset = o } },
+                modifier = Modifier.semantics { contentDescription = "Zoom out on India map" },
+            ) { Text("−") }
+            FilledTonalIconButton(
+                onClick = { scale = 0f; offset = Offset.Zero },
+                modifier = Modifier.semantics { contentDescription = "Reset India map view" },
+            ) { Text("◎") }
+        }
     }
+}
+
+private fun zoomIndia(
+    factor: Float,
+    size: IntSize,
+    scale: Float,
+    offset: Offset,
+    update: (Float, Offset) -> Unit,
+) {
+    if (scale <= 0f || size.width == 0 || size.height == 0) return
+    val center = Offset(size.width / 2f, size.height / 2f)
+    val nextScale = (scale * factor).coerceIn(size.width / MAP_WIDTH * 0.55f, 120f)
+    val ratio = nextScale / scale
+    update(nextScale, center - (center - offset) * ratio)
 }

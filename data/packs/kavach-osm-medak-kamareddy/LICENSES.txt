@@ -2,6 +2,9 @@ REAL DATA PACK, built from OpenStreetMap.
 (c) OpenStreetMap contributors. Data is available under the Open Database License (ODbL) 1.0:
 https://www.openstreetmap.org/copyright  — keep this attribution with any map or export.
 Extract: Overpass API, bbox 17.95,78.05 to 18.45,78.55 (Medak / Kamareddy area), retrieved 2026-11-19.
+Offline display map: Southern Zone Geofabrik extract downloaded 2026-11-20 (OSM data through
+2026-11-18), spatially indexed to Telangana and nearby border context. The statewide display map
+does not expand the signed routing graph. Source download: https://download.geofabrik.de/asia/india/southern-zone.html
 Crossing tags (bridge=*, culvert=*, ford=*) are mapping data, not inspection results.
 Nothing in this pack was produced by a field inspection. Every crossing starts as UNKNOWN.
 

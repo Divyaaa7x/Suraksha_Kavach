@@ -7,6 +7,7 @@ import org.junit.Test
 import org.kavach.pack.PackException
 import org.kavach.pack.PackLoader
 import java.io.File
+import java.security.MessageDigest
 
 /** Loads the REAL OSM pack that ships in the APK, and checks tamper detection. */
 class PackLoaderTest {
@@ -23,6 +24,19 @@ class PackLoaderTest {
         assertTrue(pack.indiaAreas.any { it.code == "IN-TG" })
         assertTrue(pack.attribution.contains("OpenStreetMap contributors"))
         assertTrue(pack.graph.precomputedCriticality != null)
+        val map = requireNotNull(pack.offlineMap)
+        assertTrue(map.databaseBytes > 100_000_000L)
+        val archive = File("src/main/assets/maps/telangana-map.mapdata")
+        val digest = MessageDigest.getInstance("SHA-256")
+        archive.inputStream().use { input ->
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                digest.update(buffer, 0, count)
+            }
+        }
+        assertEquals(map.archiveSha256, digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) })
     }
 
     @Test

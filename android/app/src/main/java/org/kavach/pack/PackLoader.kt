@@ -11,6 +11,7 @@ class PackException(message: String) : Exception(message)
 /** A water line for the map: river, stream, canal or drain (OpenStreetMap, ODbL). */
 data class MapFeature(val kind: String, val name: String, val coords: List<Pair<Double, Double>>)
 data class IndiaAdminArea(val name: String, val code: String, val rings: List<List<Pair<Double, Double>>>)
+data class OfflineMapMetadata(val archiveSha256: String, val databaseSha256: String, val databaseBytes: Long)
 
 data class Pack(
     val packVersion: String,
@@ -21,6 +22,7 @@ data class Pack(
     val features: List<MapFeature>,
     val indiaAreas: List<IndiaAdminArea>,
     val attribution: String,
+    val offlineMap: OfflineMapMetadata? = null,
 )
 
 /**
@@ -79,6 +81,7 @@ object PackLoader {
 
         val features = contents["features.json"]?.let { parseFeatures(it) } ?: emptyList()
         val indiaAreas = contents["india_admin1.json"]?.let { parseIndiaAreas(it) } ?: emptyList()
+        val offlineMap = contents["offline_map.json"]?.let { parseOfflineMap(it) }
 
         return Pack(
             packVersion = manifest["pack_version"] as String,
@@ -89,7 +92,18 @@ object PackLoader {
             features = features,
             indiaAreas = indiaAreas,
             attribution = (contents["LICENSES.txt"]?.let { String(it, Charsets.UTF_8) } ?: "").trim(),
+            offlineMap = offlineMap,
         )
+    }
+
+    private fun parseOfflineMap(bytes: ByteArray): OfflineMapMetadata {
+        val map = asMap(Json.parse(String(bytes, Charsets.UTF_8)))
+        val archive = map["archive_sha256"] as? String ?: throw PackException("offline map archive hash missing")
+        val database = map["database_sha256"] as? String ?: throw PackException("offline map database hash missing")
+        val size = (map["database_bytes"] as? Number)?.toLong() ?: throw PackException("offline map size missing")
+        if (!archive.matches(Regex("[0-9a-f]{64}")) || !database.matches(Regex("[0-9a-f]{64}")) || size <= 0)
+            throw PackException("offline map metadata invalid")
+        return OfflineMapMetadata(archive, database, size)
     }
 
     @Suppress("UNCHECKED_CAST")

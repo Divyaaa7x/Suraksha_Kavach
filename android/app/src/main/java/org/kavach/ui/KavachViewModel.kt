@@ -25,6 +25,7 @@ import org.kavach.location.Fix
 import org.kavach.location.Gps
 import org.kavach.service.KavachNode
 import org.kavach.sync.NearbyRelay
+import java.io.File
 
 /** Screen state and actions. Heavy work runs on Dispatchers.IO; screens only read plain state. */
 class KavachViewModel(application: Application) : AndroidViewModel(application) {
@@ -77,6 +78,8 @@ class KavachViewModel(application: Application) : AndroidViewModel(application) 
     fun features(): List<org.kavach.pack.MapFeature> = ready?.pack?.features ?: emptyList()
 
     fun indiaAreas(): List<org.kavach.pack.IndiaAdminArea> = ready?.pack?.indiaAreas ?: emptyList()
+
+    fun offlineMapDatabase(): File? = ready?.offlineMapDatabase
 
     fun packInfo(): Pair<String, String> = ready?.pack?.let { it.packVersion to it.createdAt } ?: ("none" to "")
 

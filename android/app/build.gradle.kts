@@ -9,6 +9,10 @@ android {
     namespace = "org.kavach"
     compileSdk = 34
 
+    androidResources {
+        noCompress += "mapdata"
+    }
+
     defaultConfig {
         applicationId = "org.kavach"
         minSdk = 26          // Android 8.0; the dossier's 2 GB Go-class target still runs this

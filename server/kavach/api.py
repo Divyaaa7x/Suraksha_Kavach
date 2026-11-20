@@ -3,11 +3,12 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -16,6 +17,7 @@ from pydantic import BaseModel, Field
 from .service import Hub
 from .pack import demo_signing_key
 from .signing import sign_body
+from .offline_map import OfflineMap
 
 ROOT = Path(__file__).resolve().parents[2]
 # Default is the REAL OpenStreetMap pack (ODbL). Set KAVACH_PACK_DIR to use another pack.
@@ -46,6 +48,10 @@ def create_app(pack_dir: Path = PACK_DIR, db_path: Path = DB_PATH,
     hub = Hub(db_path, pack_dir)
     app = FastAPI(title="SURAKSHA KAVACH local hub", version="0.2.0-prototype")
     app.state.hub = hub
+    map_meta = Path(pack_dir) / "offline_map.json"
+    map_asset = ROOT / "android" / "app" / "src" / "main" / "assets" / "maps" / "telangana-map.mapdata"
+    map_cache = Path(os.environ.get("KAVACH_MAP_CACHE", Path(tempfile.gettempdir()) / "suraksha-kavach-map"))
+    app.state.offline_map = OfflineMap(map_asset, map_meta, map_cache) if map_meta.is_file() and map_asset.is_file() else None
     app.add_middleware(GZipMiddleware, minimum_size=1024)
 
     @app.get("/v1/health")
@@ -96,6 +102,17 @@ def create_app(pack_dir: Path = PACK_DIR, db_path: Path = DB_PATH,
         if not path.is_file():
             path = ROOT / "data" / "raw" / "india-admin1-overview.json"
         return JSONResponse(json.loads(path.read_text(encoding="utf-8")))
+
+    @app.get("/v1/offline-map")
+    def offline_map(west: float = Query(ge=76.9, le=82.1), south: float = Query(ge=15.4, le=20.4),
+                    east: float = Query(ge=76.9, le=82.1), north: float = Query(ge=15.4, le=20.4),
+                    zoom: int = Query(ge=6, le=16)):
+        source = app.state.offline_map
+        if source is None:
+            raise HTTPException(404, "offline Telangana display map is not installed")
+        if west >= east or south >= north or east - west > 5.2 or north - south > 5.2:
+            raise HTTPException(422, "map viewport is outside the supported Telangana area")
+        return JSONResponse(source.query(west, south, east, north, zoom))
 
     @app.get("/v1/status")
     def status(scenario: str = Query(default="", max_length=500)):
