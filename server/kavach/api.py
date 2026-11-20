@@ -183,7 +183,10 @@ def create_app(pack_dir: Path = PACK_DIR, db_path: Path = DB_PATH,
 
     @app.get("/v1/features")
     def features():
-        return JSONResponse(json.loads((hub.pack_dir / "features.json").read_text(encoding="utf-8")))
+        path = hub.pack_dir / "features.json"
+        if not path.is_file():
+            return JSONResponse({"source": "none", "features": []})
+        return JSONResponse(json.loads(path.read_text(encoding="utf-8")))
 
     @app.get("/v1/india-overview")
     def india_overview():

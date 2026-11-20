@@ -52,12 +52,18 @@ jobs:
           fi
 
   dashboard:
-    name: Dashboard JavaScript syntax
+    name: Dashboard browser checks
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: "22"
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
       - run: python -c "import re,pathlib; s=pathlib.Path('server/static/index.html').read_text(); m=re.findall(r'<script>(.*?)</script>',s,re.S); assert m, 'inline script missing'; pathlib.Path('/tmp/dashboard.js').write_text(chr(10).join(m))"
       - run: node --check /tmp/dashboard.js
+      - run: python -m pip install -r server/requirements.txt -r tests/e2e/requirements.txt
+      - run: python -m playwright install --with-deps chromium
+      - run: python -m pytest -q tests/e2e/dashboard_browser.py

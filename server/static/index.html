@@ -17,7 +17,7 @@
   .banner { background:#fff3cd; color:#533f03; padding:8px 16px; font-size:13px; }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .banner { background:#3a2f0b; color:#ffe9a8; } }
   main { display:grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap:12px; padding:12px; }
-  @media (max-width: 800px) { main { grid-template-columns: 1fr; } }
+  @media (max-width: 800px) { main { grid-template-columns: minmax(0, 1fr); } main > section { min-width:0; } }
   .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px; }
   .india-overview { margin:12px 12px 0; background:var(--card); border:1px solid var(--line); border-radius:10px; }
   .india-overview > summary { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:12px 14px; cursor:pointer; font-weight:600; list-style:none; }
