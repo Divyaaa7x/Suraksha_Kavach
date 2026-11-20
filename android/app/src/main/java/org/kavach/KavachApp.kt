@@ -94,15 +94,15 @@ class KavachApp : Application() {
 
     private fun verifyOfflineMapDatabase(database: File) {
         SQLiteDatabase.openDatabase(database.absolutePath, null, SQLiteDatabase.OPEN_READONLY).use { map ->
-            for (table in listOf("roads", "road_index", "waterways", "water_index", "places", "boundaries", "boundary_index")) {
+            for (table in listOf("roads", "waterways", "places", "boundaries", "spatial_cells")) {
                 map.rawQuery("SELECT 1 FROM $table LIMIT 1", null).use { cursor ->
                     if (!cursor.moveToFirst()) throw IllegalStateException("Offline Telangana map is missing $table data")
                 }
             }
             val spatialChecks = listOf(
-                "SELECT r.id FROM road_index i JOIN roads r ON r.id=i.id WHERE i.min_lon<=81.5 AND i.max_lon>=78.0 AND i.min_lat<=19.5 AND i.max_lat>=16.0 AND r.min_zoom<=7 LIMIT 1",
-                "SELECT w.id FROM water_index i JOIN waterways w ON w.id=i.id WHERE i.min_lon<=81.5 AND i.max_lon>=78.0 AND i.min_lat<=19.5 AND i.max_lat>=16.0 LIMIT 1",
-                "SELECT b.id FROM boundary_index i JOIN boundaries b ON b.id=i.id WHERE i.min_lon<=81.5 AND i.max_lon>=78.0 AND i.min_lat<=19.5 AND i.max_lat>=16.0 AND b.min_zoom<=7 LIMIT 1",
+                "SELECT r.id FROM spatial_cells i JOIN roads r ON r.id=i.item_id WHERE i.layer='road' AND i.min_zoom BETWEEN 6 AND 7 AND i.cell_x BETWEEN 780 AND 815 AND i.cell_y BETWEEN 160 AND 195 AND r.min_zoom<=7 LIMIT 1",
+                "SELECT w.id FROM spatial_cells i JOIN waterways w ON w.id=i.item_id WHERE i.layer='water' AND i.min_zoom=0 AND i.cell_x BETWEEN 780 AND 815 AND i.cell_y BETWEEN 160 AND 195 LIMIT 1",
+                "SELECT b.id FROM spatial_cells i JOIN boundaries b ON b.id=i.item_id WHERE i.layer='boundary' AND i.min_zoom BETWEEN 6 AND 7 AND i.cell_x BETWEEN 780 AND 815 AND i.cell_y BETWEEN 160 AND 195 AND b.min_zoom<=7 LIMIT 1",
             )
             for (query in spatialChecks) {
                 map.rawQuery(query, null).use { cursor ->

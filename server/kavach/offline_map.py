@@ -4,11 +4,18 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import math
 import sqlite3
 import struct
 import tempfile
 import threading
 from pathlib import Path
+
+GRID = 0.1
+
+
+def _cell(value: float) -> int:
+    return math.floor(value / GRID)
 
 
 class OfflineMap:
@@ -62,27 +69,28 @@ class OfflineMap:
     def query(self, west: float, south: float, east: float, north: float, zoom: int) -> dict:
         db = sqlite3.connect(f"{self._db_path().as_uri()}?mode=ro", uri=True)
         try:
-            args = (east, west, north, south)
+            x0, x1, y0, y1 = _cell(west), _cell(east), _cell(south), _cell(north)
             roads = [{
                 "kind": row[1], "name": row[2], "in_state": bool(row[3]), "coords": self._points(row[4]),
             } for row in db.execute(
-                "SELECT r.id,r.highway,r.name,r.in_state,r.geometry FROM road_index i "
-                "JOIN roads r ON r.id=i.id WHERE i.min_lon<=? AND i.max_lon>=? "
-                "AND i.min_lat<=? AND i.max_lat>=? AND r.min_zoom<=? "
-                "ORDER BY r.min_zoom LIMIT 15000", (*args, zoom))]
+                "SELECT r.id,r.highway,r.name,r.in_state,r.geometry FROM roads r WHERE r.min_zoom<=? "
+                "AND r.id IN (SELECT item_id FROM spatial_cells WHERE layer='road' AND min_zoom BETWEEN 6 AND ? "
+                "AND cell_x BETWEEN ? AND ? AND cell_y BETWEEN ? AND ?) "
+                "ORDER BY r.min_zoom LIMIT 15000", (zoom, zoom, x0, x1, y0, y1))]
             water = [{"kind": row[0], "name": row[1], "coords": self._points(row[2])}
                      for row in db.execute(
-                "SELECT w.kind,w.name,w.geometry FROM water_index i JOIN waterways w ON w.id=i.id "
-                "WHERE i.min_lon<=? AND i.max_lon>=? AND i.min_lat<=? AND i.max_lat>=? LIMIT 8000", args)]
+                "SELECT w.kind,w.name,w.geometry FROM waterways w WHERE w.id IN (SELECT item_id FROM spatial_cells "
+                "WHERE layer='water' AND min_zoom=0 AND cell_x BETWEEN ? AND ? AND cell_y BETWEEN ? AND ?) "
+                "LIMIT 8000", (x0, x1, y0, y1))]
             places = [{"kind": row[0], "name": row[1], "lat": row[2], "lon": row[3]}
                       for row in db.execute(
                 "SELECT kind,name,lat,lon FROM places WHERE min_zoom<=? AND lat BETWEEN ? AND ? "
                 "AND lon BETWEEN ? AND ? LIMIT 1200", (zoom, south, north, west, east))]
             boundaries = [{"level": row[0], "name": row[1], "coords": self._points(row[2])}
                           for row in db.execute(
-                "SELECT b.admin_level,b.name,b.geometry FROM boundary_index i "
-                "JOIN boundaries b ON b.id=i.id WHERE i.min_lon<=? AND i.max_lon>=? "
-                "AND i.min_lat<=? AND i.max_lat>=? AND b.min_zoom<=?", (*args, zoom))]
+                "SELECT b.admin_level,b.name,b.geometry FROM boundaries b WHERE b.min_zoom<=? "
+                "AND b.id IN (SELECT item_id FROM spatial_cells WHERE layer='boundary' AND min_zoom BETWEEN 6 AND ? "
+                "AND cell_x BETWEEN ? AND ? AND cell_y BETWEEN ? AND ?)", (zoom, zoom, x0, x1, y0, y1))]
             return {"source": "OpenStreetMap contributors · ODbL", "roads": roads,
                     "waterways": water, "places": places, "boundaries": boundaries}
         finally:

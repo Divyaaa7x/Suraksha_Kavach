@@ -28,6 +28,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
@@ -60,6 +61,7 @@ import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.cos
+import kotlin.math.floor
 import kotlin.math.ln
 import kotlin.math.pow
 
@@ -73,16 +75,19 @@ private data class TelanganaSnapshot(val roads: Map<Pair<Int, Boolean>, Path>, v
 /** Reads only geometries intersecting the current viewport from the signed offline map database. */
 private class TelanganaMapStore(file: File) : AutoCloseable {
     private val db = SQLiteDatabase.openDatabase(file.absolutePath, null, SQLiteDatabase.OPEN_READONLY)
+    private fun cell(value: Double) = floor(value * 10.0).toInt()
 
     fun query(bounds: MapBounds, highlightedWays: Set<Long>): Pair<List<OfflineRoad>, List<OfflinePlace>> {
         val roads = ArrayList<OfflineRoad>()
         val ids = highlightedWays.take(500)
         val highlightClause = if (ids.isEmpty()) "" else " OR r.id IN (${ids.joinToString(",")})"
         db.rawQuery(
-            "SELECT r.id,r.highway,r.name,r.in_state,r.min_zoom,r.geometry FROM road_index i JOIN roads r ON r.id=i.id " +
-                "WHERE i.min_lon<=? AND i.max_lon>=? AND i.min_lat<=? AND i.max_lat>=? " +
-                "AND (r.min_zoom<=?$highlightClause) ORDER BY r.min_zoom LIMIT 15000",
-            arrayOf(bounds.east.toString(), bounds.west.toString(), bounds.north.toString(), bounds.south.toString(), bounds.zoom.toString()),
+            "SELECT r.id,r.highway,r.name,r.in_state,r.min_zoom,r.geometry FROM roads r WHERE " +
+                "(r.id IN (SELECT item_id FROM spatial_cells WHERE layer='road' AND min_zoom BETWEEN 6 AND ? " +
+                "AND cell_x BETWEEN ? AND ? AND cell_y BETWEEN ? AND ?)" + highlightClause +
+                ") AND r.min_zoom<=? ORDER BY r.min_zoom LIMIT 15000",
+            arrayOf(bounds.zoom.toString(), cell(bounds.west).toString(), cell(bounds.east).toString(),
+                cell(bounds.south).toString(), cell(bounds.north).toString(), bounds.zoom.toString()),
         ).use { c ->
             while (c.moveToNext()) {
                 val bytes = c.getBlob(5)
@@ -103,9 +108,10 @@ private class TelanganaMapStore(file: File) : AutoCloseable {
     fun queryWater(bounds: MapBounds): List<List<Pair<Double, Double>>> {
         val lines = ArrayList<List<Pair<Double, Double>>>()
         db.rawQuery(
-            "SELECT w.geometry FROM water_index i JOIN waterways w ON w.id=i.id " +
-                "WHERE i.min_lon<=? AND i.max_lon>=? AND i.min_lat<=? AND i.max_lat>=? LIMIT 8000",
-            arrayOf(bounds.east.toString(), bounds.west.toString(), bounds.north.toString(), bounds.south.toString()),
+            "SELECT w.geometry FROM waterways w WHERE w.id IN (SELECT item_id FROM spatial_cells " +
+                "WHERE layer='water' AND min_zoom=0 AND cell_x BETWEEN ? AND ? AND cell_y BETWEEN ? AND ?) LIMIT 8000",
+            arrayOf(cell(bounds.west).toString(), cell(bounds.east).toString(),
+                cell(bounds.south).toString(), cell(bounds.north).toString()),
         ).use { c ->
             while (c.moveToNext()) {
                 val bytes = c.getBlob(0)
@@ -121,9 +127,11 @@ private class TelanganaMapStore(file: File) : AutoCloseable {
     fun queryBoundaries(bounds: MapBounds): Map<Int, List<List<Pair<Double, Double>>>> {
         val lines = LinkedHashMap<Int, MutableList<List<Pair<Double, Double>>>>()
         db.rawQuery(
-            "SELECT b.admin_level,b.geometry FROM boundary_index i JOIN boundaries b ON b.id=i.id " +
-                "WHERE i.min_lon<=? AND i.max_lon>=? AND i.min_lat<=? AND i.max_lat>=? AND b.min_zoom<=?",
-            arrayOf(bounds.east.toString(), bounds.west.toString(), bounds.north.toString(), bounds.south.toString(), bounds.zoom.toString()),
+            "SELECT b.admin_level,b.geometry FROM boundaries b WHERE b.id IN (SELECT item_id FROM spatial_cells " +
+                "WHERE layer='boundary' AND min_zoom BETWEEN 6 AND ? AND cell_x BETWEEN ? AND ? " +
+                "AND cell_y BETWEEN ? AND ?) AND b.min_zoom<=?",
+            arrayOf(bounds.zoom.toString(), cell(bounds.west).toString(), cell(bounds.east).toString(),
+                cell(bounds.south).toString(), cell(bounds.north).toString(), bounds.zoom.toString()),
         ).use { c ->
             while (c.moveToNext()) {
                 val bytes = c.getBlob(1)
@@ -198,6 +206,22 @@ fun TelanganaOfflineMap(
         scale = minOf(size.width / stateWidth.toFloat(), size.height / stateHeight.toFloat()) * .90f
         offset = Offset((size.width / 2f - centerLon * lonScale * scale).toFloat(),
             (size.height / 2f + centerLat * scale).toFloat())
+    }
+    LaunchedEffect(size, highlightedEdges, state) {
+        if (highlightedEdges.isEmpty() || size.width == 0 || size.height == 0) return@LaunchedEffect
+        val points = highlightedEdges.flatMap { id ->
+            graph.edges[id]?.let { edge -> listOfNotNull(graph.nodes[edge.u], graph.nodes[edge.v]) }.orEmpty()
+        }
+        if (points.isEmpty()) return@LaunchedEffect
+        val minX = points.minOf { it.lon * lonScale }.toFloat()
+        val maxX = points.maxOf { it.lon * lonScale }.toFloat()
+        val minY = points.minOf { -it.lat }.toFloat()
+        val maxY = points.maxOf { -it.lat }.toFloat()
+        val routeWidth = (maxX - minX).coerceAtLeast(.005f)
+        val routeHeight = (maxY - minY).coerceAtLeast(.005f)
+        scale = (minOf(size.width / routeWidth, size.height / routeHeight) * .72f).coerceAtMost(18000f)
+        offset = Offset(size.width / 2f - (minX + maxX) / 2f * scale,
+            size.height / 2f - (minY + maxY) / 2f * scale)
     }
     LaunchedEffect(size, scale, offset, routeWays) {
         if (scale <= 0f || size.width == 0 || size.height == 0) return@LaunchedEffect
@@ -277,6 +301,11 @@ fun TelanganaOfflineMap(
             }
             .pointerInput(crossings) {
                 detectTapGestures { tap ->
+                    val fitScale = minOf(size.width / stateWidth.toFloat(), size.height / stateHeight.toFloat()) * .90f
+                    if (currentScale < fitScale * 4f) {
+                        onSelectCrossing(null)
+                        return@detectTapGestures
+                    }
                     val hit = crossings.minByOrNull { (_, p) ->
                         val at = Offset((p.lon * lonScale).toFloat() * currentScale + currentOffset.x, -p.lat.toFloat() * currentScale + currentOffset.y)
                         (at - tap).getDistanceSquared()
@@ -324,30 +353,40 @@ fun TelanganaOfflineMap(
                     drawPath(snapshot.route, Color.White, style = Stroke(10f * strokeScale, cap = StrokeCap.Round))
                     drawPath(snapshot.route, Color(0xFF087E68), style = Stroke(6f * strokeScale, cap = StrokeCap.Round))
                 }
-                val occupied = HashSet<Pair<Int, Int>>()
+                val occupied = ArrayList<Rect>()
                 val textStyle = TextStyle(fontSize = 10.sp, color = Color(0xFF34443D))
                 snapshot.places.sortedBy { when (it.kind) { "city" -> 0; "town" -> 1; "hospital", "clinic", "doctors" -> 2; "village" -> 3; "road" -> 4; else -> 5 } }.forEach { place ->
                     if (place.name.isBlank()) return@forEach
+                    val labelZoom = when (place.kind) {
+                        "city" -> 7; "town" -> 9; "village" -> 11; "hamlet", "suburb", "neighbourhood", "locality" -> 13
+                        "hospital", "clinic", "doctors" -> 11; "road" -> 9; else -> 16
+                    }
+                    if ((bounds?.zoom ?: 0) < labelZoom) return@forEach
                     val world = Offset((place.lon * lonScale).toFloat(), -place.lat.toFloat())
                     val screen = world * scale + offset
                     if (screen.x !in 4f..size.width.toFloat() - 80f || screen.y !in 4f..size.height.toFloat() - 10f) return@forEach
-                    val cell = (screen.x / 86).toInt() to (screen.y / 26).toInt()
-                    if (!occupied.add(cell)) return@forEach
-                    if (place.kind == "road") {
-                        drawText(measurer.measure(place.name, textStyle.copy(fontSize = 9.sp, color = Color(0xFF56645C))),
-                            topLeft = Offset(screen.x + 2f, screen.y - 6f))
-                    } else {
-                        val medical = place.kind == "hospital" || place.kind == "clinic" || place.kind == "doctors"
-                        drawCircle(if (medical) Color(0xFFC4655C) else Color(0xFF486B5C),
-                            radius = if (place.kind == "city" || place.kind == "town") 3.2f else 2.2f, center = screen)
-                        drawText(measurer.measure(place.name, textStyle), topLeft = Offset(screen.x + 5f, screen.y - 7f))
-                    }
+                    val isRoad = place.kind == "road"
+                    val medical = place.kind == "hospital" || place.kind == "clinic" || place.kind == "doctors"
+                    val labelStyle = if (isRoad) textStyle.copy(fontSize = 9.sp, color = Color(0xFF56645C)) else textStyle
+                    val label = measurer.measure(place.name, labelStyle)
+                    val topLeft = Offset(if (isRoad) screen.x + 2f else screen.x + 5f,
+                        screen.y - label.size.height / 2f)
+                    val box = Rect(topLeft.x, topLeft.y, topLeft.x + label.size.width, topLeft.y + label.size.height)
+                    if (occupied.any { box.left < it.right + 6f && box.right + 6f > it.left &&
+                            box.top < it.bottom + 4f && box.bottom + 4f > it.top }) return@forEach
+                    occupied += box
+                    if (!isRoad) drawCircle(if (medical) Color(0xFFC4655C) else Color(0xFF486B5C),
+                        radius = if (place.kind == "city" || place.kind == "town") 3.2f else 2.2f, center = screen)
+                    drawText(label, topLeft = topLeft)
                 }
-                crossings.forEach { (id, point) ->
-                    val screen = Offset((point.lon * lonScale).toFloat() * scale + offset.x, -point.lat.toFloat() * scale + offset.y)
-                    val color = statusColor(statuses[id]?.status ?: Status.UNKNOWN)
-                    drawCircle(color, if (id == selectedCrossing) 6f else 4f, screen)
-                    drawCircle(Color.White, 1.2f, screen)
+                val fitScale = minOf(size.width / stateWidth.toFloat(), size.height / stateHeight.toFloat()) * .90f
+                if (scale >= fitScale * 4f) {
+                    crossings.forEach { (id, point) ->
+                        val screen = Offset((point.lon * lonScale).toFloat() * scale + offset.x, -point.lat.toFloat() * scale + offset.y)
+                        val color = statusColor(statuses[id]?.status ?: Status.UNKNOWN)
+                        drawCircle(color, if (id == selectedCrossing) 6f else 4f, screen)
+                        drawCircle(Color.White, 1.2f, screen)
+                    }
                 }
             }
         }

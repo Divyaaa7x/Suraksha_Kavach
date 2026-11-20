@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import sqlite3
 import struct
 import sys
@@ -26,6 +27,15 @@ ROAD_ZOOM = {
 }
 WATER = {"river", "stream", "canal", "drain", "ditch"}
 PLACES = {"city", "town", "village", "hamlet", "suburb", "neighbourhood", "locality"}
+GRID = 0.1
+
+
+def spatial_cells(layer: str, min_zoom: int, item_id: int, west: float, south: float, east: float, north: float):
+    """Cover a feature bbox with small indexed cells; unlike RTree, works in Android SQLite."""
+    x0, x1 = math.floor(west / GRID), math.floor(east / GRID)
+    y0, y1 = math.floor(south / GRID), math.floor(north / GRID)
+    return ((layer, min_zoom, x, y, item_id)
+            for x in range(x0, x1 + 1) for y in range(y0, y1 + 1))
 
 
 def encode_points(points: list[tuple[float, float]]) -> bytes:
@@ -67,17 +77,17 @@ def main() -> None:
       PRAGMA page_size=4096;
       CREATE TABLE roads(id INTEGER PRIMARY KEY, highway TEXT NOT NULL, name TEXT NOT NULL,
         min_zoom INTEGER NOT NULL, in_state INTEGER NOT NULL, geometry BLOB NOT NULL);
-      CREATE VIRTUAL TABLE road_index USING rtree(id, min_lon, max_lon, min_lat, max_lat);
       CREATE INDEX roads_zoom ON roads(min_zoom);
       CREATE TABLE waterways(id INTEGER PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL,
         geometry BLOB NOT NULL);
-      CREATE VIRTUAL TABLE water_index USING rtree(id, min_lon, max_lon, min_lat, max_lat);
       CREATE TABLE places(id INTEGER PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL,
         lat REAL NOT NULL, lon REAL NOT NULL, min_zoom INTEGER NOT NULL, in_state INTEGER NOT NULL);
       CREATE INDEX places_zoom_lat ON places(min_zoom, lat);
       CREATE TABLE boundaries(id INTEGER PRIMARY KEY, admin_level INTEGER NOT NULL,
         name TEXT NOT NULL, min_zoom INTEGER NOT NULL, geometry BLOB NOT NULL);
-      CREATE VIRTUAL TABLE boundary_index USING rtree(id, min_lon, max_lon, min_lat, max_lat);
+      CREATE TABLE spatial_cells(layer TEXT NOT NULL, min_zoom INTEGER NOT NULL,
+        cell_x INTEGER NOT NULL, cell_y INTEGER NOT NULL, item_id INTEGER NOT NULL,
+        PRIMARY KEY(layer,min_zoom,cell_x,cell_y,item_id)) WITHOUT ROWID;
       CREATE TABLE map_metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
     """)
     db.executemany("INSERT INTO map_metadata VALUES(?,?)", [
@@ -126,19 +136,22 @@ def main() -> None:
                     "INSERT INTO roads VALUES(?,?,?,?,?,?)",
                     (way.id, highway, tags.get("name", ""), ROAD_ZOOM[highway], int(inside), encode_points(points)),
                 )
-                self.cursor.execute("INSERT INTO road_index VALUES(?,?,?,?,?)", (way.id, w, e, s, n))
+                self.cursor.executemany("INSERT INTO spatial_cells VALUES(?,?,?,?,?)",
+                    spatial_cells("road", ROAD_ZOOM[highway], way.id, w, s, e, n))
                 self.roads += 1
                 self.inside_roads += inside
             if water in WATER:
                 self.cursor.execute("INSERT INTO waterways VALUES(?,?,?,?)",
                     (way.id, water, tags.get("name", ""), encode_points(points)))
-                self.cursor.execute("INSERT INTO water_index VALUES(?,?,?,?,?)", (way.id, w, e, s, n))
+                self.cursor.executemany("INSERT INTO spatial_cells VALUES(?,?,?,?,?)",
+                    spatial_cells("water", 0, way.id, w, s, e, n))
                 self.waterways += 1
             if admin and admin_level in {"4", "5", "6", "7", "8"}:
                 level = int(admin_level)
                 self.cursor.execute("INSERT OR REPLACE INTO boundaries VALUES(?,?,?,?,?)",
                     (way.id, level, tags.get("name", ""), {4: 6, 5: 7, 6: 9, 7: 10, 8: 11}[level], encode_points(points)))
-                self.cursor.execute("INSERT OR REPLACE INTO boundary_index VALUES(?,?,?,?,?)", (way.id, w, e, s, n))
+                self.cursor.executemany("INSERT OR REPLACE INTO spatial_cells VALUES(?,?,?,?,?)",
+                    spatial_cells("boundary", {4: 6, 5: 7, 6: 9, 7: 10, 8: 11}[level], way.id, w, s, e, n))
                 self.boundaries += 1
             if self.roads + self.waterways >= self.next_progress:
                 db.commit()

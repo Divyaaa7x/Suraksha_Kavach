@@ -79,10 +79,11 @@ def test_signed_telanganamap_asset_is_complete_and_spatially_indexed(tmp_path):
     assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     roads, in_state = db.execute("SELECT count(*),sum(in_state) FROM roads").fetchone()
     assert roads > 500_000 and in_state > 500_000
-    assert db.execute("SELECT count(*) FROM road_index").fetchone()[0] == roads
+    assert db.execute("SELECT count(*) FROM spatial_cells WHERE layer='road'").fetchone()[0] >= roads
     assert db.execute("SELECT count(*) FROM waterways").fetchone()[0] > 9_000
     assert db.execute("SELECT count(*) FROM places").fetchone()[0] > 30_000
     assert db.execute("SELECT count(*) FROM boundaries").fetchone()[0] > 0
+    assert db.execute("SELECT sql FROM sqlite_master WHERE name='spatial_cells'").fetchone()[0].endswith("WITHOUT ROWID")
     assert db.execute("SELECT value FROM map_metadata WHERE key='source_timestamp'").fetchone()[0].startswith("2026-11-19")
     db.close()
 
