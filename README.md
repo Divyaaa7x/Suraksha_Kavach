@@ -40,6 +40,8 @@ Open `http://127.0.0.1:8000/`. The default hub uses the OSM pack; the demo-pack 
 
 ## Website hosting (Cloudflare Pages)
 
+**Static dashboard preview:** [suraksha-kavach-prototype.pages.dev](https://suraksha-kavach-prototype.pages.dev). The page is uploaded on Cloudflare's free Pages tier; live coordinator data and actions are unavailable until the FastAPI API is hosted and connected.
+
 The coordinator dashboard currently lives at `/` and its `/v1/*` API is served by the FastAPI app in the same process. Cloudflare Pages can host a static copy of the dashboard, but it does **not** deploy this FastAPI service or its SQLite event store. A Pages-only deployment is therefore a static preview unless an API is separately deployed and configured; do not point it at the unauthenticated local hub or expose bearer tokens over plain HTTP.
 
 To create a static Pages preview from this repository, create a Pages project connected to the GitHub repository, set the production branch to `main`, leave the build command empty, and set the build output directory to `server/static`. The checked-in `index.html` and its local assets will be served, but API features require a separately hosted, TLS-protected backend. The current app has no Cloudflare API/SQLite deployment configuration; use the local hub for private demos until authenticated production hosting, durable storage, and API URL configuration are implemented and verified. Do not describe the Pages preview as a fully hosted working coordinator system yet.
