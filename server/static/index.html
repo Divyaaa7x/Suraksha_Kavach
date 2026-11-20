@@ -101,8 +101,8 @@
     <label for="crossingPicker">Pilot crossing</label>
     <select id="crossingPicker" aria-label="Select a pilot crossing"><option value="">Choose a crossing</option></select>
     <label for="mapSearch">Search pilot crossings and mapped places</label>
-    <input id="mapSearch" type="search" autocomplete="off" placeholder="Search a settlement, facility, or crossing">
-    <div id="mapSearchResults" class="map-search-results" role="listbox" aria-label="Map search results" hidden></div>
+    <input id="mapSearch" type="search" autocomplete="off" aria-controls="mapSearchResults" aria-expanded="false" placeholder="Search a settlement, facility, or crossing">
+    <div id="mapSearchResults" class="map-search-results" role="group" aria-label="Map search results" hidden></div>
     <p class="muted" id="mapSource" aria-live="polite">Loading offline Telangana map…</p>
     <p class="muted" id="gver"></p>
   </section>
@@ -449,11 +449,12 @@ $('crossingPicker').addEventListener('change', () => {
 $('closePlace').addEventListener('click', () => { $('placeCard').hidden = true; $('crossingPicker').value = ''; selected = null; selectedCoord = null; draw(); });
 $('mapSearch').addEventListener('input', () => {
   const results = searchMap($('mapSearch').value), box = $('mapSearchResults');
-  box.replaceChildren(...results.map((item, i) => {
-    const button = document.createElement('button'); button.type = 'button'; button.setAttribute('role', 'option');
+  box.replaceChildren(...results.map((item) => {
+    const button = document.createElement('button'); button.type = 'button';
     button.textContent = item.label; button.addEventListener('click', () => chooseSearchResult(item)); return button;
   }));
   box.hidden = results.length === 0;
+  $('mapSearch').setAttribute('aria-expanded', String(results.length > 0));
 });
 
 let drag = null, moved = false;
@@ -514,11 +515,11 @@ function searchMap(query) {
 }
 
 function chooseSearchResult(result) {
-  if (result.crossing) { showDetail(result.id); $('mapSearchResults').hidden = true; return; }
+  if (result.crossing) { showDetail(result.id); $('mapSearchResults').hidden = true; $('mapSearch').setAttribute('aria-expanded', 'false'); return; }
   const point = toXY(result.lat, result.lon), k = view.k;
   $('placeCard').hidden = true; $('crossingPicker').value = ''; selected = null;
   moveCamera({k, x:canvas.clientWidth/2-point[0]*k, y:canvas.clientHeight/2-point[1]*k});
-  selectedCoord = point; draw(); scheduleOfflineMap(); $('mapSearchResults').hidden = true;
+  selectedCoord = point; draw(); scheduleOfflineMap(); $('mapSearchResults').hidden = true; $('mapSearch').setAttribute('aria-expanded', 'false');
 }
 
 function bboxOf(nodes) {
