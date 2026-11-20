@@ -55,6 +55,12 @@ def test_dashboard_loads_and_computes_warned_route_on_mobile_viewport(dashboard_
         assert page.locator("#crossingPicker option").count() == 5
         assert responses.get("features") == 200
 
+        page.locator("#mapSearch").fill("C1")
+        page.get_by_role("button", name="C1 · culvert").click()
+        assert page.locator("#placeCard").is_visible()
+        assert page.locator("#placeStatus").inner_text() == "UNKNOWN"
+        page.get_by_role("button", name="Close crossing details").click()
+
         page.locator("#policy").select_option("unverified_warning")
         page.get_by_role("button", name="Compute route").click()
         page.wait_for_function("document.querySelector('#routeOut').textContent.includes('Result: ROUTE_CANDIDATE')")
