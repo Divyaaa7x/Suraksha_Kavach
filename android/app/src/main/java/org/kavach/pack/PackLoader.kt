@@ -12,7 +12,14 @@ class PackException(message: String) : Exception(message)
 /** A water line for the map: river, stream, canal or drain (OpenStreetMap, ODbL). */
 data class MapFeature(val kind: String, val name: String, val coords: List<Pair<Double, Double>>)
 data class IndiaAdminArea(val name: String, val code: String, val rings: List<List<Pair<Double, Double>>>)
-data class OfflineMapMetadata(val archiveSha256: String, val databaseSha256: String, val databaseBytes: Long)
+data class OfflineMapMetadata(
+    val archiveSha256: String,
+    val databaseSha256: String,
+    val databaseBytes: Long,
+    val routesArchiveSha256: String? = null,
+    val routesDatabaseSha256: String? = null,
+    val routesDatabaseBytes: Long? = null,
+)
 
 data class Pack(
     val packVersion: String,
@@ -101,14 +108,24 @@ object PackLoader {
         )
     }
 
-    private fun parseOfflineMap(bytes: ByteArray): OfflineMapMetadata {
+    internal fun parseOfflineMap(bytes: ByteArray): OfflineMapMetadata {
         val map = asMap(Json.parse(String(bytes, Charsets.UTF_8)))
         val archive = map["archive_sha256"] as? String ?: throw PackException("offline map archive hash missing")
         val database = map["database_sha256"] as? String ?: throw PackException("offline map database hash missing")
         val size = (map["database_bytes"] as? Number)?.toLong() ?: throw PackException("offline map size missing")
         if (!archive.matches(Regex("[0-9a-f]{64}")) || !database.matches(Regex("[0-9a-f]{64}")) || size <= 0)
             throw PackException("offline map metadata invalid")
-        return OfflineMapMetadata(archive, database, size)
+        val routesArchive = map["routes_archive_sha256"] as? String
+        val routesDatabase = map["routes_database_sha256"] as? String
+        val routesSize = (map["routes_database_bytes"] as? Number)?.toLong()
+        if (listOf(routesArchive, routesDatabase, routesSize).any { it != null }) {
+            if (routesArchive == null || routesDatabase == null || routesSize == null ||
+                !routesArchive.matches(Regex("[0-9a-f]{64}")) ||
+                !routesDatabase.matches(Regex("[0-9a-f]{64}")) || routesSize <= 0) {
+                throw PackException("statewide route metadata invalid")
+            }
+        }
+        return OfflineMapMetadata(archive, database, size, routesArchive, routesDatabase, routesSize)
     }
 
     @Suppress("UNCHECKED_CAST")

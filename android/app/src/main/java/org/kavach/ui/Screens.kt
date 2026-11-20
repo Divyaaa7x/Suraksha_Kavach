@@ -61,6 +61,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Place
 import org.kavach.PackState
 import org.kavach.graph.Policy
+import org.kavach.graph.OfflineRoutePlace
 import org.kavach.graph.RoadGraph
 import org.kavach.graph.Status
 import org.kavach.sync.NearbyRelay
@@ -286,6 +287,7 @@ private fun MapScreen(vm: KavachViewModel) {
                     onSelectCrossing = { vm.selectedCrossing = it },
                     mapHeight = mapHeight,
                     focusLocation = focusLocation,
+                    highlightedRouteCoordinates = vm.highlightedRouteCoordinates,
                 )
                 NodePicker("Pilot crossing", crossingOptions, vm.selectedCrossing.orEmpty()) {
                     vm.selectedCrossing = it
@@ -341,7 +343,8 @@ private fun MapScreen(vm: KavachViewModel) {
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 6.dp))
-                Text("Route analysis: Medak and Kamareddy",
+                Text(if (vm.hasOfflineStatewideRoutes()) "Offline route graph: Telangana · OSM"
+                    else "Route analysis: Medak and Kamareddy",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
@@ -356,7 +359,9 @@ private fun MapScreen(vm: KavachViewModel) {
             if (vm.highlightedRouteEdges.isNotEmpty()) {
                 val matched = vm.highlightedRouteEdges.count { it in graph.edges }
                 Text(
-                    if (matched == vm.highlightedRouteEdges.size)
+                    if (vm.route?.graphVersion == "osm-statewide")
+                        "Statewide route candidate · ${vm.highlightedRouteEdges.size} road segments"
+                    else if (matched == vm.highlightedRouteEdges.size)
                         "Candidate route · $matched segments"
                     else "Map mismatch · $matched of ${vm.highlightedRouteEdges.size} segments",
                     style = MaterialTheme.typography.labelSmall,
@@ -452,6 +457,18 @@ private fun NodePicker(label: String, nodes: List<Pair<String, String>>, selecte
 @Composable
 private fun RoutesScreen(vm: KavachViewModel, onShowMap: () -> Unit) {
     val graph = vm.graph() ?: return
+    val hasStatewideRoutes = vm.hasOfflineStatewideRoutes()
+    var statewideMode by remember(graph) { mutableStateOf(hasStatewideRoutes) }
+    if (hasStatewideRoutes) Section("Routing coverage") {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(selected = statewideMode, onClick = { statewideMode = true }, label = { Text("Telangana offline") })
+            FilterChip(selected = !statewideMode, onClick = { statewideMode = false }, label = { Text("Pilot") })
+        }
+    }
+    if (hasStatewideRoutes && statewideMode) {
+        StatewideRoutesScreen(vm, onShowMap)
+        return
+    }
     val places = remember(graph) {
         graph.nodes.values.filter { it.kind != "junction" }
             .map { it.id to (it.name.ifEmpty { it.id }) }
@@ -492,7 +509,7 @@ private fun RoutesScreen(vm: KavachViewModel, onShowMap: () -> Unit) {
         }
         if (vm.message.startsWith("Route could not")) Text(vm.message, color = Color(0xFFB3261E))
     }
-    vm.route?.let { r ->
+    vm.route?.takeIf { it.graphVersion != "osm-statewide" }?.let { r ->
         Section("Result: ${r.result}") {
             if (r.path.isNotEmpty()) Text("Road nodes on route: ${r.path.size}; segments: ${r.edges.size}")
             if (r.path.isNotEmpty()) OutlinedButton(onClick = onShowMap) { Text("Show route on map") }
@@ -513,6 +530,67 @@ private fun RoutesScreen(vm: KavachViewModel, onShowMap: () -> Unit) {
         Section("Baseline: plain shortest path (ignores crossing status)") {
             if (s.path.isEmpty()) Text("No path")
             else Text("${s.path.size} road nodes · ${s.travelTimeS?.toInt()} s. Compare with the constrained route above.")
+        }
+    }
+}
+
+@Composable
+private fun StatewideRoutesScreen(vm: KavachViewModel, onShowMap: () -> Unit) {
+    var originQuery by remember { mutableStateOf(vm.statewideOrigin?.name.orEmpty()) }
+    var destinationQuery by remember { mutableStateOf(vm.statewideDestination?.name.orEmpty()) }
+    var vehicle by remember { mutableStateOf("light") }
+    var policy by remember { mutableStateOf(Policy.STRICT) }
+    Section("Telangana · offline route planning") {
+        Text("Search mapped places. Unknown crossings are blocked in strict mode; warning routes include uncertain crossings and require human review.",
+            style = MaterialTheme.typography.bodySmall)
+        RoutePlaceSearch("From", originQuery, vm.statewideOriginSearchResults, vm.statewideOrigin,
+            onQuery = { originQuery = it; vm.searchStatewidePlaces(it, true) },
+            onSelect = { originQuery = it.name; vm.selectStatewidePlace(it, true) })
+        RoutePlaceSearch("To", destinationQuery, vm.statewideDestinationSearchResults, vm.statewideDestination,
+            onQuery = { destinationQuery = it; vm.searchStatewidePlaces(it, false) },
+            onSelect = { destinationQuery = it.name; vm.selectStatewidePlace(it, false) })
+        Text("Vehicle", Modifier.padding(top = 6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf("light", "medium", "heavy").forEach { v ->
+                FilterChip(selected = vehicle == v, onClick = { vehicle = v }, label = { Text(v) })
+            }
+        }
+        Text("Crossing policy", Modifier.padding(top = 6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FilterChip(selected = policy == Policy.STRICT, onClick = { policy = Policy.STRICT }, label = { Text("Strict") })
+            FilterChip(selected = policy == Policy.UNVERIFIED_WARNING,
+                onClick = { policy = Policy.UNVERIFIED_WARNING }, label = { Text("Warning") })
+        }
+        Button(onClick = { vm.computeStatewideRoute(vehicle, policy) }, enabled = !vm.statewideRouteBusy,
+            modifier = Modifier.padding(top = 8.dp)) { Text("Plan offline route") }
+        if (vm.statewideRouteBusy) CircularProgressIndicator(Modifier.padding(8.dp))
+        if (vm.message.startsWith("Statewide route") || vm.message.startsWith("Choose both"))
+            Text(vm.message, color = Color(0xFFB3261E), modifier = Modifier.padding(top = 6.dp))
+    }
+    if (!vm.statewideRouteBusy) vm.route?.takeIf { it.graphVersion == "osm-statewide" }?.let { route ->
+        Section("Result · ${route.result.replace('_', ' ')}") {
+            if (route.path.isNotEmpty()) {
+                Text("${route.edges.size} road segments · ${route.travelTimeS?.toInt()} s estimated")
+                OutlinedButton(onClick = onShowMap, modifier = Modifier.padding(top = 6.dp)) { Text("Show on map") }
+            }
+            Text(route.caveat, style = MaterialTheme.typography.bodySmall)
+            if (route.uncertain.isNotEmpty()) Text("${route.uncertain.size} uncertain crossing segment(s) included",
+                color = Color(0xFFA15C00))
+        }
+    }
+}
+
+@Composable
+private fun RoutePlaceSearch(label: String, query: String, results: List<OfflineRoutePlace>,
+                             selected: OfflineRoutePlace?, onQuery: (String) -> Unit,
+                             onSelect: (OfflineRoutePlace) -> Unit) {
+    OutlinedTextField(value = query, onValueChange = onQuery, label = { Text(label) }, singleLine = true,
+        supportingText = { selected?.let { Text("${it.kind} · offline OSM") } },
+        modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+    if (results.isNotEmpty()) LazyColumn(Modifier.fillMaxWidth().heightIn(max = 180.dp)) {
+        items(results, key = { it.id }) { place ->
+            Text("${place.name} · ${place.kind}", Modifier.fillMaxWidth()
+                .clickable { onSelect(place) }.padding(horizontal = 10.dp, vertical = 10.dp))
         }
     }
 }

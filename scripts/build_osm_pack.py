@@ -22,7 +22,9 @@ import gzip
 import hashlib
 import json
 import os
+import re
 import shutil
+import sqlite3
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -39,7 +41,9 @@ RAW = ROOT / "data" / "raw" / "osm-medak-kamareddy-2026-11-19.json"
 OUT = ROOT / "data" / "packs" / "kavach-osm-medak-kamareddy"
 PACK_VERSION = "OSM-MK-2026-11-20"
 TELANGANA_MAP = Path(os.environ.get("KAVACH_TELANGANA_MAP_DB", ROOT / "data" / "raw" / "telangana-map.sqlite"))
+TELANGANA_ROUTES = Path(os.environ.get("KAVACH_TELANGANA_ROUTES_DB", ROOT / "data" / "raw" / "telangana-routes.sqlite"))
 ANDROID_MAP = ROOT / "android" / "app" / "src" / "main" / "assets" / "maps" / "telangana-map.mapdata"
+ANDROID_ROUTES = ROOT / "android" / "app" / "src" / "main" / "assets" / "maps" / "telangana-routes.mapdata"
 LINK_RADIUS_M = 1500.0
 SPUR_SPEED_KMH = 20.0
 PILOT_SPEED_KMH = {
@@ -72,6 +76,46 @@ def sha256_file(path: Path) -> str:
         for block in iter(lambda: source.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def build_offline_map_metadata(map_db: Path, map_archive: Path, routes_db: Path, routes_archive: Path) -> bytes:
+    map_archive.parent.mkdir(parents=True, exist_ok=True)
+    with map_db.open("rb") as source, map_archive.open("wb") as target:
+        with gzip.GzipFile(filename="", mode="wb", fileobj=target, mtime=0, compresslevel=6) as compressed:
+            shutil.copyfileobj(source, compressed, length=1024 * 1024)
+    metadata = {
+        "schema": 1,
+        "archive_sha256": sha256_file(map_archive),
+        "database_sha256": sha256_file(map_db),
+        "database_bytes": map_db.stat().st_size,
+        "archive_bytes": map_archive.stat().st_size,
+        "source": "OpenStreetMap South India Geofabrik extract, ODbL",
+    }
+    if routes_db.is_file():
+        routes_archive.parent.mkdir(parents=True, exist_ok=True)
+        with routes_db.open("rb") as source, routes_archive.open("wb") as target:
+            with gzip.GzipFile(filename="", mode="wb", fileobj=target, mtime=0, compresslevel=6) as compressed:
+                shutil.copyfileobj(source, compressed, length=1024 * 1024)
+        with sqlite3.connect(routes_db) as route_connection:
+            route_source = dict(route_connection.execute("SELECT key,value FROM route_metadata"))
+        with sqlite3.connect(f"file:{map_db.as_posix()}?mode=ro", uri=True) as map_connection:
+            map_source = dict(map_connection.execute("SELECT key,value FROM map_metadata")).get("source_sha256")
+        route_source_hash = route_source.get("source_sha256", "")
+        if (not re.fullmatch(r"[0-9a-f]{64}", route_source_hash)
+                or not re.fullmatch(r"[0-9a-f]{64}", map_source or "")
+                or route_source_hash != map_source):
+            routes_archive.unlink(missing_ok=True)
+            raise ValueError("statewide route and display databases are from different OSM extracts")
+        metadata.update({
+            "routes_archive_sha256": sha256_file(routes_archive),
+            "routes_database_sha256": sha256_file(routes_db),
+            "routes_database_bytes": routes_db.stat().st_size,
+            "routes_archive_bytes": routes_archive.stat().st_size,
+            "routes_source_timestamp": route_source.get("source_timestamp", "unknown"),
+        })
+    else:
+        routes_archive.unlink(missing_ok=True)
+    return json.dumps(metadata, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
 class GridIndex:
@@ -257,18 +301,7 @@ def main() -> None:
         raise FileNotFoundError(
             f"{TELANGANA_MAP} missing; build it with `python scripts/build_telangana_map.py <south-zone.osm.pbf>`"
         )
-    ANDROID_MAP.parent.mkdir(parents=True, exist_ok=True)
-    with TELANGANA_MAP.open("rb") as source, ANDROID_MAP.open("wb") as target:
-        with gzip.GzipFile(filename="", mode="wb", fileobj=target, mtime=0, compresslevel=6) as compressed:
-            shutil.copyfileobj(source, compressed, length=1024 * 1024)
-    map_metadata = json.dumps({
-        "schema": 1,
-        "archive_sha256": sha256_file(ANDROID_MAP),
-        "database_sha256": sha256_file(TELANGANA_MAP),
-        "database_bytes": TELANGANA_MAP.stat().st_size,
-        "archive_bytes": ANDROID_MAP.stat().st_size,
-        "source": "OpenStreetMap South India Geofabrik extract, ODbL",
-    }, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    map_metadata = build_offline_map_metadata(TELANGANA_MAP, ANDROID_MAP, TELANGANA_ROUTES, ANDROID_ROUTES)
 
     out = build_pack(OUT, graph, policy, pack_version=PACK_VERSION, licenses_text=LICENSES,
                      extra_files={"features.json": features_json, "criticality.json": crit_json,

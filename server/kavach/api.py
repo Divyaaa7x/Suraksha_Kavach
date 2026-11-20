@@ -114,6 +114,13 @@ class RouteRequest(BaseModel):
     scenario_at_risk: list[str] = Field(default_factory=list, max_length=50)
 
 
+class StatewideRouteRequest(BaseModel):
+    origin: str = Field(min_length=1, max_length=20)
+    destination: str = Field(min_length=1, max_length=20)
+    vehicle: str = Field(default="light", pattern="^(light|medium|heavy)$")
+    policy: str = Field(default="strict", pattern="^(strict|unverified_warning)$")
+
+
 class DemoApprovalRequest(BaseModel):
     asset_id: str = Field(min_length=1, max_length=128)
     approved_status: str = Field(pattern="^(VERIFIED_OPEN|VERIFIED_CLOSED|RESTRICTED)$")
@@ -122,7 +129,8 @@ class DemoApprovalRequest(BaseModel):
 
 def create_app(pack_dir: Path = PACK_DIR, db_path: Path = DB_PATH,
                demo_approvals_enabled: bool | None = None,
-               hub_token: str | None = None) -> FastAPI:
+               hub_token: str | None = None,
+               routes_db_path: Path | None = None) -> FastAPI:
     if demo_approvals_enabled is None:
         demo_approvals_enabled = os.environ.get("KAVACH_DEMO_MODE", "").lower() in {"1", "true", "yes"}
     if hub_token is None:
@@ -131,7 +139,17 @@ def create_app(pack_dir: Path = PACK_DIR, db_path: Path = DB_PATH,
     if hub_token and len(hub_token.encode("utf-8")) < 32:
         raise ValueError("KAVACH_HUB_TOKEN must contain at least 32 UTF-8 bytes")
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    hub = Hub(db_path, pack_dir)
+    pack_dir = Path(pack_dir)
+    offline_meta_path = pack_dir / "offline_map.json"
+    offline_meta = json.loads(offline_meta_path.read_text(encoding="utf-8")) if offline_meta_path.is_file() else {}
+    expected_routes_hash = offline_meta.get("routes_database_sha256")
+    if routes_db_path is None:
+        configured = os.environ.get("KAVACH_TELANGANA_ROUTES_DB")
+        routes_db_path = Path(configured) if configured else ROOT / "data" / "raw" / "telangana-routes.sqlite"
+    if not Path(routes_db_path).is_file():
+        routes_db_path = None
+    hub = Hub(db_path, pack_dir, routes_db_path if expected_routes_hash else None,
+              expected_routes_hash if routes_db_path and expected_routes_hash else None)
     app = FastAPI(title="SURAKSHA KAVACH local hub", version="0.2.0-prototype")
     app.state.hub = hub
     map_meta = Path(pack_dir) / "offline_map.json"
@@ -179,6 +197,7 @@ def create_app(pack_dir: Path = PACK_DIR, db_path: Path = DB_PATH,
                           for c in g.crossings.values()],
             "nodes": [n.__dict__ for n in g.nodes.values()],
             "edges": [e.__dict__ for e in g.edges.values()],
+            "statewide_routes_available": hub.statewide_routes is not None,
         }
 
     @app.get("/v1/features")
@@ -227,6 +246,18 @@ def create_app(pack_dir: Path = PACK_DIR, db_path: Path = DB_PATH,
     @app.post("/v1/routes/compute")
     def compute(req: RouteRequest):
         return hub.route(req.origin, req.destination, req.vehicle, req.policy, req.scenario_at_risk)
+
+    @app.get("/v1/routes/places")
+    def route_places(q: str = Query(min_length=1, max_length=80), limit: int = Query(default=20, ge=1, le=50)):
+        if hub.statewide_routes is None:
+            raise HTTPException(404, "signed statewide route database is not installed")
+        return hub.search_statewide_places(q, limit)
+
+    @app.post("/v1/statewide/routes/compute")
+    def compute_statewide(req: StatewideRouteRequest):
+        if hub.statewide_routes is None:
+            raise HTTPException(404, "signed statewide route database is not installed")
+        return hub.route_statewide(req.origin, req.destination, req.vehicle, req.policy)
 
     @app.get("/v1/isolated-settlements")
     def isolated(vehicle: str = "light", policy: str = Query(default="strict", pattern="^(strict|unverified_warning)$"),

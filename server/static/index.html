@@ -121,8 +121,14 @@
   <section>
     <div class="card">
       <h2>Compare routes</h2>
+      <label id="routeModeWrap" hidden>Network
+        <select id="routeMode"><option value="pilot">Pilot route graph</option><option value="statewide">Telangana OSM network</option></select></label>
       <label>From <select id="origin"></select></label>
       <label>To <select id="dest"></select></label>
+      <label id="stateOriginWrap" hidden>Telangana origin
+        <input id="stateOrigin" list="stateOriginOptions" autocomplete="off" placeholder="Search a place"><datalist id="stateOriginOptions"></datalist></label>
+      <label id="stateDestWrap" hidden>Telangana destination
+        <input id="stateDest" list="stateDestOptions" autocomplete="off" placeholder="Search a place"><datalist id="stateDestOptions"></datalist></label>
       <label>Vehicle class
         <select id="vehicle"><option>light</option><option>medium</option><option>heavy</option></select></label>
       <label>Policy
@@ -159,7 +165,7 @@ const ROAD_W = { motorway:3, trunk:3, primary:2.5, secondary:2, tertiary:1.6, un
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-let G = null, F = null, INDIA = null, selectedState = 'IN-TG', ST = {}, view = {x:0, y:0, k:1}, bounds, roadPath = null, featurePaths = {}, offlinePaths = null, crossEdges = [], selected = null, routeEdges = new Set(), offlineMap = null, mapTimer = null, mapRequest = 0, detailRequest = 0, cameraFrame = 0, selectedCoord = null;
+let G = null, F = null, INDIA = null, selectedState = 'IN-TG', ST = {}, view = {x:0, y:0, k:1}, bounds, roadPath = null, featurePaths = {}, offlinePaths = null, crossEdges = [], selected = null, routeEdges = new Set(), routeGeometry = null, statewidePlaceIndex = new Map(), offlineMap = null, mapTimer = null, mapRequest = 0, detailRequest = 0, cameraFrame = 0, selectedCoord = null;
 const canvas = $('map'), ctx = canvas.getContext('2d');
 const indiaCanvas = $('india'), indiaCtx = indiaCanvas.getContext('2d');
 
@@ -217,6 +223,15 @@ function focusRoute(edgeIds) {
   const k = Math.min(w / rw, h / rh) * 0.72;
   moveCamera({k, x:w / 2 - ((x0 + x1) / 2) * k, y:h / 2 - ((y0 + y1) / 2) * k});
   return valid.length / 2;
+}
+
+function focusGeometry(geometry) {
+  if (!geometry?.length) return 0;
+  let x0=Infinity,x1=-Infinity,y0=Infinity,y1=-Infinity;
+  for (const [lat,lon] of geometry) { const [x,y]=toXY(lat,lon); x0=Math.min(x0,x); x1=Math.max(x1,x); y0=Math.min(y0,y); y1=Math.max(y1,y); }
+  const k=Math.min(canvas.clientWidth/Math.max(x1-x0,.001),canvas.clientHeight/Math.max(y1-y0,.001))*.72;
+  moveCamera({k,x:canvas.clientWidth/2-(x0+x1)/2*k,y:canvas.clientHeight/2-(y0+y1)/2*k});
+  return Math.max(0,geometry.length-1);
 }
 
 function screen([x,y]) { return [x * view.k + view.x, y * view.k + view.y]; }
@@ -337,6 +352,13 @@ function draw() {
       if (!a || !b) continue;
       ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]);
     }
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 9 / view.k; ctx.stroke();
+    ctx.strokeStyle = '#00695c'; ctx.lineWidth = 5 / view.k; ctx.stroke();
+  }
+  if (routeGeometry?.length > 1) {
+    ctx.beginPath();
+    routeGeometry.forEach(([lat, lon], i) => { const [x,y] = toXY(lat, lon); i ? ctx.lineTo(x,y) : ctx.moveTo(x,y); });
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     ctx.strokeStyle = '#fff'; ctx.lineWidth = 9 / view.k; ctx.stroke();
     ctx.strokeStyle = '#00695c'; ctx.lineWidth = 5 / view.k; ctx.stroke();
@@ -634,6 +656,15 @@ async function init() {
     window.DEMO_APPROVALS_ENABLED = Boolean(h.demo_approvals_enabled);
     $('gver').textContent = `Pack created ${h.pack_created_at}. ${h.source_class_note}`;
     G = await j('/v1/assets');
+    if (G.statewide_routes_available) {
+      $('routeModeWrap').hidden = false;
+      $('routeMode').onchange = () => {
+        const statewide = $('routeMode').value === 'statewide';
+        $('origin').parentElement.hidden = statewide; $('dest').parentElement.hidden = statewide;
+        $('stateOriginWrap').hidden = !statewide; $('stateDestWrap').hidden = !statewide;
+        routeEdges = new Set(); routeGeometry = null; draw();
+      };
+    }
     setIndiaOverview(await j('/v1/india-overview'));
     const names = G.nodes.filter(n => n.kind !== 'junction' && n.name);
     const opts = names.map(n => `<option value="${esc(n.node_id)}">${esc(n.name)}</option>`).join('');
@@ -663,10 +694,26 @@ $('go').onclick = async () => {
   $('go').disabled = true;
   $('routeOut').textContent = 'Computing route…';
   try {
+    if (G.statewide_routes_available && $('routeMode').value === 'statewide') {
+      const origin = statewidePlaceIndex.get($('stateOrigin').value), destination = statewidePlaceIndex.get($('stateDest').value);
+      if (!origin || !destination) throw new Error('Choose origin and destination from the Telangana place suggestions.');
+      const r = await j('/v1/statewide/routes/compute', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+        origin:origin.node_id,destination:destination.node_id,vehicle:$('vehicle').value,policy:$('policy').value})});
+      routeEdges = new Set(); routeGeometry = r.result === 'ROUTE_CANDIDATE' ? r.geometry : null;
+      const matched = routeGeometry ? focusGeometry(routeGeometry) : 0;
+      const time = Number.isFinite(r.travel_time_s) ? `Class-speed estimate: ${Math.round(r.travel_time_s/60)} min (not measured).` : 'No travel-time estimate.';
+      $('routeOut').textContent = [`Result: ${r.result || 'ERROR'}`, `Statewide route segments: ${matched}.`,
+        `Policy: ${r.policy || $('policy').value} · vehicle: ${r.vehicle || $('vehicle').value}.`,
+        `Unverified segments excluded: ${r.unverified_segments_excluded || 0}.`,
+        r.uncertain_crossings?.length ? `Crossings with UNKNOWN status: ${r.uncertain_crossings.length}.` : '',
+        time, r.caveat || '', r.error || ''].filter(Boolean).join('\n');
+      draw(); return;
+    }
     const body = { origin: $('origin').value, destination: $('dest').value, vehicle: $('vehicle').value,
                    policy: $('policy').value, scenario_at_risk: scenario ? scenario.split(',').map(s => s.trim()) : [] };
     const r = await j('/v1/routes/compute', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
     routeEdges = r.result === 'ROUTE_CANDIDATE' ? new Set(r.edges || []) : new Set();
+    routeGeometry = null;
     const matched = routeEdges.size ? focusRoute([...routeEdges]) : 0;
     const time = Number.isFinite(r.travel_time_s) ? `Class-speed estimate: ${Math.round(r.travel_time_s / 60)} min (not measured).` : 'No travel-time estimate.';
     const caveat = r.caveat || 'A route candidate is not a safety determination; human review is required.';
@@ -681,10 +728,25 @@ $('go').onclick = async () => {
     ].filter(Boolean).join('\n');
     await refreshStatus(scenario); draw(); await refreshPanels(scenario);
   } catch (err) {
-    routeEdges = new Set(); fit(); draw();
+    routeEdges = new Set(); routeGeometry = null; fit(); draw();
     $('routeOut').textContent = `Route request failed: ${err.message}`;
   } finally { $('go').disabled = false; }
 };
+
+for (const [inputId, listId] of [['stateOrigin','stateOriginOptions'],['stateDest','stateDestOptions']]) {
+  let lookup = 0;
+  $(inputId).addEventListener('input', async () => {
+    const q = $(inputId).value.trim(), current = ++lookup;
+    if (!q || q.length < 2 || !G?.statewide_routes_available) return;
+    try {
+      const places = await j(`/v1/routes/places?q=${encodeURIComponent(q)}&limit=20`);
+      if (current !== lookup) return;
+      const options = places.map(p => ({...p, label:`${p.name} · ${p.kind} · ${p.place_id}`}));
+      options.forEach(p => statewidePlaceIndex.set(p.label,p));
+      $(listId).innerHTML = options.map(p=>`<option value="${esc(p.label)}"></option>`).join('');
+    } catch (_) { $(listId).replaceChildren(); }
+  });
+}
 
 init();
 </script>

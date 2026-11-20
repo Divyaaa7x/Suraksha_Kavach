@@ -14,6 +14,7 @@ from pathlib import Path
 
 from . import graph as G
 from .pack import load_pack, PackError
+from .statewide_routes import StatewideRoutes
 from .signing import (APPROVABLE_STATES, MAX_EVENT_BYTES, OBSERVATION_TYPES, ROLE_FIELD,
                       ROLE_SUPERVISOR, TrustRegistry, now_iso)
 
@@ -37,12 +38,15 @@ SOURCE_CLASSES = {"FIELD", "SIMULATED"}
 
 
 class Hub:
-    def __init__(self, db_path: str | Path, pack_dir: str | Path):
+    def __init__(self, db_path: str | Path, pack_dir: str | Path,
+                 route_db_path: str | Path | None = None, route_db_sha256: str | None = None):
         self.pack_dir = Path(pack_dir)
         self.pack = load_pack(pack_dir)  # raises PackError on tampering (T-06)
         self.graph: G.RoadGraph = self.pack["graph"]
         self.trust: TrustRegistry = self.pack["trust"]
         self.pack_version: str = self.pack["manifest"]["pack_version"]
+        self.statewide_routes = (StatewideRoutes(route_db_path, route_db_sha256)
+                                 if route_db_path and route_db_sha256 else None)
         self._lock = threading.Lock()
         self.db = sqlite3.connect(str(db_path), check_same_thread=False)
         self.db.row_factory = sqlite3.Row
@@ -210,6 +214,17 @@ class Hub:
         res = G.plan_route(self.graph, self._status_map(scenario_at_risk), origin, dest, vehicle, policy)
         res["baseline_shortest_path"] = G.shortest_path(self.graph, origin, dest)
         return res
+
+    def search_statewide_places(self, query: str, limit: int = 20) -> list[dict]:
+        if self.statewide_routes is None:
+            return []
+        return self.statewide_routes.search_places(query, limit)
+
+    def route_statewide(self, origin: str, dest: str, vehicle: str = "light", policy: str = G.STRICT) -> dict:
+        if self.statewide_routes is None:
+            return {"error": "signed statewide route database is not installed"}
+        # The current trust registry only covers pilot crossings, so statewide crossings stay UNKNOWN.
+        return self.statewide_routes.compute(origin, dest, vehicle, policy)
 
     def isolated(self, vehicle: str = "light", policy: str = G.STRICT, scenario_at_risk=None) -> list[dict]:
         return G.isolated_settlements(self.graph, self._status_map(scenario_at_risk), vehicle, policy)

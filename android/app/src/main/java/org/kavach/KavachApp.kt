@@ -23,7 +23,15 @@ import java.util.zip.GZIPInputStream
 /** Pack loading state. The real pack is ~16 MB, so it is verified on a background thread. */
 sealed interface PackState {
     data object Loading : PackState
-    data class Ready(val pack: Pack, val node: KavachNode, val sync: LanSync, val offlineMapDatabase: File?, val offlineMapError: String? = null) : PackState
+    data class Ready(
+        val pack: Pack,
+        val node: KavachNode,
+        val sync: LanSync,
+        val offlineMapDatabase: File?,
+        val offlineMapError: String? = null,
+        val offlineRouteDatabase: File? = null,
+        val offlineRouteError: String? = null,
+    ) : PackState
     data class Failed(val message: String) : PackState
 }
 
@@ -49,12 +57,29 @@ class KavachApp : Application() {
                 val ready = PackState.Ready(pack, node, LanSync(node), null)
                 _state.value = ready
                 pack.offlineMap?.let { metadata ->
+                    var current = ready
                     try {
                         val offlineMap = installOfflineMap(metadata.archiveSha256, metadata.databaseSha256, metadata.databaseBytes)
-                        _state.value = ready.copy(offlineMapDatabase = offlineMap)
+                        current = current.copy(offlineMapDatabase = offlineMap)
                     } catch (e: Exception) {
                         Log.e("KavachApp", "Offline Telangana map initialization failed", e)
-                        _state.value = ready.copy(offlineMapError = e.message ?: e.javaClass.simpleName)
+                        current = current.copy(offlineMapError = e.message ?: e.javaClass.simpleName)
+                    }
+                    _state.value = current
+                    if (metadata.routesArchiveSha256 != null && metadata.routesDatabaseSha256 != null &&
+                        metadata.routesDatabaseBytes != null) {
+                        try {
+                            val routes = installCompressedDatabase(
+                                "maps/telangana-routes.mapdata", "telangana-routes",
+                                metadata.routesArchiveSha256, metadata.routesDatabaseSha256,
+                                metadata.routesDatabaseBytes, ::verifyOfflineRouteDatabase,
+                            )
+                            current = current.copy(offlineRouteDatabase = routes)
+                        } catch (e: Exception) {
+                            Log.e("KavachApp", "Offline statewide route database initialization failed", e)
+                            current = current.copy(offlineRouteError = e.message ?: e.javaClass.simpleName)
+                        }
+                        _state.value = current
                     }
                 }
             } catch (e: Exception) {
@@ -65,17 +90,31 @@ class KavachApp : Application() {
     }
 
     private fun installOfflineMap(archiveHash: String, databaseHash: String, expectedBytes: Long): File {
-        val database = File(filesDir, "telangana-map-$databaseHash.sqlite")
+        return installCompressedDatabase(
+            "maps/telangana-map.mapdata", "telangana-map", archiveHash, databaseHash, expectedBytes,
+            ::verifyOfflineMapDatabase,
+        )
+    }
+
+    private fun installCompressedDatabase(
+        assetPath: String,
+        filePrefix: String,
+        archiveHash: String,
+        databaseHash: String,
+        expectedBytes: Long,
+        verify: (File) -> Unit,
+    ): File {
+        val database = File(filesDir, "$filePrefix-$databaseHash.sqlite")
         if (database.isFile && database.length() == expectedBytes && sha256(database) == databaseHash) {
-            verifyOfflineMapDatabase(database)
+            verify(database)
             return database
         }
-        val temp = File(filesDir, "telangana-map.tmp")
+        val temp = File(filesDir, "$filePrefix.tmp")
         temp.delete()
         val archiveDigest = MessageDigest.getInstance("SHA-256")
         val databaseDigest = MessageDigest.getInstance("SHA-256")
         var written = 0L
-        GZIPInputStream(DigestInputStream(assets.open("maps/telangana-map.mapdata"), archiveDigest)).use { input ->
+        GZIPInputStream(DigestInputStream(assets.open(assetPath), archiveDigest)).use { input ->
             FileOutputStream(temp).use { output ->
                 val buffer = ByteArray(64 * 1024)
                 while (true) {
@@ -97,8 +136,28 @@ class KavachApp : Application() {
             temp.delete()
             throw IllegalStateException("Offline Telangana map could not be installed")
         }
-        verifyOfflineMapDatabase(database)
+        verify(database)
         return database
+    }
+
+    private fun verifyOfflineRouteDatabase(database: File) {
+        SQLiteDatabase.openDatabase(database.absolutePath, null, SQLiteDatabase.OPEN_READONLY).use { routes ->
+            for ((table, minimum) in listOf("route_nodes" to 2, "route_edges" to 1, "route_crossings" to 1, "route_places" to 1)) {
+                routes.rawQuery("SELECT 1 FROM $table LIMIT $minimum", null).use { cursor ->
+                    var rows = 0
+                    while (rows < minimum && cursor.moveToNext()) rows++
+                    if (rows < minimum) throw IllegalStateException("Statewide route database is missing $table data")
+                }
+            }
+            for (index in listOf("route_edges_from", "route_edges_to", "route_edges_crossing", "route_places_name")) {
+                routes.rawQuery("SELECT 1 FROM sqlite_master WHERE type='index' AND name=?", arrayOf(index)).use { cursor ->
+                    if (!cursor.moveToFirst()) throw IllegalStateException("Statewide route index $index is missing")
+                }
+            }
+            routes.rawQuery("SELECT 1 FROM route_metadata WHERE key='source_sha256' LIMIT 1", null).use { cursor ->
+                if (!cursor.moveToFirst()) throw IllegalStateException("Statewide route source metadata is missing")
+            }
+        }
     }
 
     private fun verifyOfflineMapDatabase(database: File) {

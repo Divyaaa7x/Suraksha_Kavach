@@ -8,6 +8,8 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.kavach.KavachApp
@@ -16,6 +18,8 @@ import org.kavach.core.Signed
 import org.kavach.data.EventEntity
 import org.kavach.graph.InspectionRow
 import org.kavach.graph.Isolated
+import org.kavach.graph.OfflineRoutePlace
+import org.kavach.graph.OfflineRouteStore
 import org.kavach.graph.Policy
 import org.kavach.graph.RoadGraph
 import org.kavach.graph.RouteResult
@@ -57,6 +61,20 @@ class KavachViewModel(application: Application) : AndroidViewModel(application) 
         private set
     var highlightedRouteEdges by mutableStateOf<Set<String>>(emptySet())
         private set
+    var highlightedRouteCoordinates by mutableStateOf<List<Pair<Double, Double>>>(emptyList())
+        private set
+    var statewideOriginSearchResults by mutableStateOf<List<OfflineRoutePlace>>(emptyList())
+        private set
+    var statewideDestinationSearchResults by mutableStateOf<List<OfflineRoutePlace>>(emptyList())
+        private set
+    var statewideOrigin by mutableStateOf<OfflineRoutePlace?>(null)
+        private set
+    var statewideDestination by mutableStateOf<OfflineRoutePlace?>(null)
+        private set
+    var statewideRouteBusy by mutableStateOf(false)
+        private set
+    private var originSearchJob: Job? = null
+    private var destinationSearchJob: Job? = null
     var showLocalDetail by mutableStateOf(true)
     var isolated by mutableStateOf<List<Isolated>>(emptyList())
         private set
@@ -81,6 +99,73 @@ class KavachViewModel(application: Application) : AndroidViewModel(application) 
     fun indiaAreas(): List<org.kavach.pack.IndiaAdminArea> = ready?.pack?.indiaAreas ?: emptyList()
 
     fun offlineMapDatabase(): File? = ready?.offlineMapDatabase
+
+    fun hasOfflineStatewideRoutes(): Boolean = ready?.offlineRouteDatabase?.isFile == true
+
+    fun searchStatewidePlaces(query: String, forOrigin: Boolean) {
+        val db = ready?.offlineRouteDatabase ?: return
+        val selected = if (forOrigin) statewideOrigin else statewideDestination
+        if (selected?.name != query) {
+            if (forOrigin) statewideOrigin = null else statewideDestination = null
+            route = null
+            shortest = null
+            highlightedRouteEdges = emptySet()
+            highlightedRouteCoordinates = emptyList()
+        }
+        val job = if (forOrigin) originSearchJob else destinationSearchJob
+        job?.cancel()
+        if (forOrigin) statewideOriginSearchResults = emptyList() else statewideDestinationSearchResults = emptyList()
+        val search = viewModelScope.launch {
+            delay(180)
+            val results = try {
+                withContext(Dispatchers.IO) { OfflineRouteStore(db).searchPlaces(query) }
+            } catch (e: Exception) {
+                message = "Offline place search failed: ${e.message ?: e.javaClass.simpleName}"
+                emptyList()
+            }
+            if (forOrigin) statewideOriginSearchResults = results else statewideDestinationSearchResults = results
+        }
+        if (forOrigin) originSearchJob = search else destinationSearchJob = search
+    }
+
+    fun selectStatewidePlace(place: OfflineRoutePlace, forOrigin: Boolean) {
+        if (forOrigin) statewideOrigin = place else statewideDestination = place
+        if (forOrigin) statewideOriginSearchResults = emptyList() else statewideDestinationSearchResults = emptyList()
+    }
+
+    fun computeStatewideRoute(vehicle: String, policy: String) {
+        val db = ready?.offlineRouteDatabase ?: return
+        val origin = statewideOrigin
+        val destination = statewideDestination
+        if (origin == null || destination == null) {
+            message = "Choose both an origin and destination."
+            return
+        }
+        val n = node ?: return
+        statewideRouteBusy = true
+        viewModelScope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    val trustedStatuses = n.statuses().mapValues { it.value.status }
+                    val store = OfflineRouteStore(db)
+                    store.route(origin, destination, vehicle, policy, trustedStatuses) to store
+                }
+                route = result.first
+                shortest = null
+                highlightedRouteEdges = result.first.edges.toSet()
+                highlightedRouteCoordinates = withContext(Dispatchers.IO) { result.second.coordinates(result.first.path) }
+                message = ""
+            } catch (e: Exception) {
+                route = null
+                shortest = null
+                highlightedRouteEdges = emptySet()
+                highlightedRouteCoordinates = emptyList()
+                message = "Statewide route could not be computed: ${e.message ?: e.javaClass.simpleName}"
+            } finally {
+                statewideRouteBusy = false
+            }
+        }
+    }
 
     fun packInfo(): Pair<String, String> = ready?.pack?.let { it.packVersion to it.createdAt } ?: ("none" to "")
 
@@ -120,6 +205,7 @@ class KavachViewModel(application: Application) : AndroidViewModel(application) 
                 route = results.first
                 shortest = results.second
                 highlightedRouteEdges = results.first.edges.toSet()
+                highlightedRouteCoordinates = emptyList()
                 message = ""
             } catch (e: Exception) {
                 route = null

@@ -1,12 +1,15 @@
 from pathlib import Path
 import sqlite3
 import sys
+import json
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from osm_routing import allowed_vehicles, oneway_direction, vehicle_mask
 import build_telangana_map
+import build_osm_pack
 
 
 def test_osm_access_precedence_filters_vehicle_classes():
@@ -52,3 +55,38 @@ def test_route_schema_keeps_indexed_adjacency_without_temporary_snap_cells():
     ))
     assert "route_edges_from" in plan and "route_edges_to" in plan
     assert db.execute("SELECT name FROM sqlite_master WHERE name='route_node_cells'").fetchone() is None
+
+
+def test_signed_map_metadata_binds_matching_route_database_hashes(tmp_path):
+    map_db, routes_db = tmp_path / "map.sqlite", tmp_path / "routes.sqlite"
+    source_hash = "a" * 64
+    with sqlite3.connect(map_db) as db:
+        db.execute("CREATE TABLE map_metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL)")
+        db.executemany("INSERT INTO map_metadata VALUES(?,?)", [("source_sha256", source_hash), ("schema", "1")])
+    with sqlite3.connect(routes_db) as db:
+        db.execute("CREATE TABLE route_metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL)")
+        db.executemany("INSERT INTO route_metadata VALUES(?,?)", [("source_sha256", source_hash), ("source_timestamp", "today")])
+    map_archive, route_archive = tmp_path / "map.mapdata", tmp_path / "routes.mapdata"
+    metadata = json.loads(build_osm_pack.build_offline_map_metadata(map_db, map_archive, routes_db, route_archive))
+    assert metadata["routes_database_bytes"] == routes_db.stat().st_size
+    assert metadata["routes_archive_bytes"] == route_archive.stat().st_size
+    assert metadata["routes_archive_sha256"] == build_osm_pack.sha256_file(route_archive)
+    with sqlite3.connect(routes_db) as db:
+        db.execute("UPDATE route_metadata SET value=? WHERE key='source_sha256'", ("b" * 64,))
+    with pytest.raises(ValueError, match="different OSM extracts"):
+        build_osm_pack.build_offline_map_metadata(map_db, map_archive, routes_db, route_archive)
+    assert not route_archive.exists()
+
+
+def test_map_metadata_builder_removes_stale_route_asset_when_no_route_database(tmp_path):
+    map_db, map_archive = tmp_path / "map.sqlite", tmp_path / "map.mapdata"
+    route_archive = tmp_path / "routes.mapdata"
+    with sqlite3.connect(map_db) as db:
+        db.execute("CREATE TABLE map_metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL)")
+        db.execute("INSERT INTO map_metadata VALUES('source_sha256',?)", ("a" * 64,))
+    route_archive.write_bytes(b"stale")
+    metadata = json.loads(build_osm_pack.build_offline_map_metadata(
+        map_db, map_archive, tmp_path / "missing-routes.sqlite", route_archive,
+    ))
+    assert "routes_archive_sha256" not in metadata
+    assert not route_archive.exists()

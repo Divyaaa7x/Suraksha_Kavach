@@ -2,6 +2,16 @@
 
 Updated 20 November 2026. This report contains observed results only; unrun hardware and platform checks stay pending.
 
+## Statewide route runtime continuation — 20 November 2026
+
+- Added optional signed-data packaging and installation for the statewide route SQLite database. The pack builder verifies that map and route databases came from the same SHA-256-pinned OSM extract; Android verifies both compressed archive and expanded database hashes, then checks route tables and indexes. Route-table validation now probes only the first required rows rather than scanning millions of rows at startup.
+- Added an Android SQLite place search and A* route planner with indexed adjacency, one-way direction, vehicle masks, and a bounded search. The Routes screen preserves both pilot and Telangana modes; statewide results can be framed and highlighted on the offline map. Unknown mapped crossings are blocked under strict policy and clearly flagged under warning policy; OSM tags never imply passability.
+- Added a hub SQLite route store with signed-database hash verification, place search, route compute API, and dashboard statewide mode. Pilot remains the default. Dashboard browser E2E covers place autocomplete, statewide route submission, unknown-crossing warning, and map geometry.
+- Verification on the current working tree: Python suite **74 passed**; Android demo unit tests **31 passed**; production variant **29 passed, 3 demo-only skipped**; dashboard browser E2E **3 passed**; inline JavaScript syntax and `git diff --check` passed. The route metadata packaging helper was exercised with the generated databases: map DB **131,264,512 B**, route DB **590,577,664 B**, compressed route asset **297,135,922 B**. Map/route source hashes matched.
+- Pixel 8a wireless ADB check: the current demo APK launched without a fatal app exception; the existing pilot route computed and highlighted on the offline Telangana map. The checked-in pack has no statewide route asset, so this device check did not exercise the new statewide runtime.
+- The route runtime is optional and remains dormant in standard repository builds until a matching route DB is distributed and its hash is signed into the pack. No statewide crossing status is currently accepted through the trusted field event workflow, so all OSM crossing IDs remain `UNKNOWN`. The route output is a decision-support candidate, not turn-by-turn navigation or safety certification.
+- Production gates still open: distribution of the 297 MB route asset; trusted statewide crossing inspections/approvals; production device identity enrollment and release signing; mandatory authenticated TLS hosting/deployment; two-device Nearby validation; and performance/acceptance testing on a 2 GB device. The Pixel 8a has 7.75 GB RAM and does not meet that hardware test requirement.
+
 ## Latest continuation verification — 20 November 2026
 
 - OSM routing rules: Python suite **61 passed**; Android `testDemoDebugUnitTest` **26 passed** and `testProductionDebugUnitTest` **24 passed, 3 demo-only tests skipped**; both demo and production debug APKs assembled. Dashboard browser E2E: **2 passed**.
@@ -15,8 +25,8 @@ Updated 20 November 2026. This report contains observed results only; unrun hard
 - The offline map builder now creates an additional indexed SQLite route database during the same PBF pass. Against the Southern Zone source, it produced **3,897,281 nodes, 4,165,108 segments, 10,158 tagged crossings, and 20,610 snapped places/facilities out of 21,157**. It excludes explicitly closed/private/destination-only and conditional-access roads, stores per-class access masks, and applies one-way direction.
 - The final route DB schema uses numeric way/segment keys and indexed `u`/`v` adjacency; temporary snap-grid rows are removed. The generated 590,577,664-byte DB passed SQLite `integrity_check`. Gzip at level 6 measured 297,135,922 bytes. The adjacency query plan uses both indexes.
 - A desktop SQLite A* baseline from Kamareddy to Nizamabad found a 754-segment path in 2.06 seconds after 37,807 expansions. It crossed 10 tagged structures; because status-policy filtering is not connected in this prototype, this demonstrates topology only and must not be used as a safe route.
-- Builder tests cover access rules, direction handling, stable nearest-place snapping, and adjacency index use. Full Python suite: **63 passed**.
-- This route DB is not packaged or consumed by Android or the hub. Its compressed size exceeds GitHub's normal per-file limit, and the repository has no configured Git LFS upload access. Statewide routing, safe crossing-status decisions, app search/highlighting, and device performance remain incomplete.
+- At the initial data-generation stage, builder tests covered access rules, direction handling, stable nearest-place snapping, and adjacency index use; the Python suite then had **63 passed**.
+- At that initial stage the route DB was not packaged or consumed. The runtime and signed-metadata packaging were added in the continuation section above. The 297 MB asset is still absent from this repository, and Git LFS upload access is not configured, so the checked-in app/hub do not yet receive statewide routing data.
 
 ## Current branch follow-up — 20 November 2026
 

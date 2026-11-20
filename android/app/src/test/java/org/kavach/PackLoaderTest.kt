@@ -7,6 +7,7 @@ import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.kavach.pack.PackException
 import org.kavach.pack.PackLoader
+import org.kavach.pack.OfflineMapMetadata
 import java.io.File
 import java.security.MessageDigest
 
@@ -14,6 +15,30 @@ import java.security.MessageDigest
 class PackLoaderTest {
 
     private val packDir = File("src/main/assets/pack")
+
+    @Test
+    fun routeDatabaseMetadataMustBeCompleteAndWellFormed() {
+        val hash = "a".repeat(64)
+        val legacy = PackLoader.parseOfflineMap(
+            """{"archive_sha256":"$hash","database_sha256":"$hash","database_bytes":100}"""
+                .toByteArray(),
+        )
+        assertEquals(OfflineMapMetadata(hash, hash, 100), legacy)
+        val metadata = PackLoader.parseOfflineMap(
+            """{"archive_sha256":"$hash","database_sha256":"$hash","database_bytes":100,"routes_archive_sha256":"$hash","routes_database_sha256":"$hash","routes_database_bytes":200}"""
+                .toByteArray(),
+        )
+        assertEquals(OfflineMapMetadata(hash, hash, 100, hash, hash, 200), metadata)
+        try {
+            PackLoader.parseOfflineMap(
+                """{"archive_sha256":"$hash","database_sha256":"$hash","database_bytes":100,"routes_archive_sha256":"bad"}"""
+                    .toByteArray(),
+            )
+            fail("partial route metadata must be rejected")
+        } catch (e: PackException) {
+            assertTrue(e.message!!.contains("route metadata invalid"))
+        }
+    }
 
     @Test
     fun realPackVerifiesAndIsOsmSourced() {

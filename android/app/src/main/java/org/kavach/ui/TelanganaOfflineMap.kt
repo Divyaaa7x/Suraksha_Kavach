@@ -163,6 +163,7 @@ fun TelanganaOfflineMap(
     onSelectCrossing: (String?) -> Unit,
     mapHeight: androidx.compose.ui.unit.Dp = 500.dp,
     focusLocation: Pair<Double, Double>? = null,
+    highlightedRouteCoordinates: List<Pair<Double, Double>> = emptyList(),
 ) {
     val store = remember(database) { TelanganaMapStore(database) }
     DisposableEffect(store) { onDispose { store.close() } }
@@ -190,7 +191,7 @@ fun TelanganaOfflineMap(
         }.distinctBy { it.first }
     }
     val routeWays = remember(graph, highlightedEdges) {
-        highlightedEdges.mapNotNull { graph.edges[it]?.id?.let(::routeWayId) }.toSet()
+        highlightedEdges.mapNotNull { id -> graph.edges[id]?.id?.let(::routeWayId) ?: routeWayId(id) }.toSet()
     }
     val measurer = rememberTextMeasurer()
     val scope = rememberCoroutineScope()
@@ -217,16 +218,17 @@ fun TelanganaOfflineMap(
         offset = Offset((size.width / 2f - centerLon * lonScale * scale).toFloat(),
             (size.height / 2f + centerLat * scale).toFloat())
     }
-    LaunchedEffect(size, highlightedEdges, state) {
+    LaunchedEffect(size, highlightedEdges, highlightedRouteCoordinates, state) {
         if (highlightedEdges.isEmpty() || size.width == 0 || size.height == 0) return@LaunchedEffect
         val points = highlightedEdges.flatMap { id ->
             graph.edges[id]?.let { edge -> listOfNotNull(graph.nodes[edge.u], graph.nodes[edge.v]) }.orEmpty()
         }
-        if (points.isEmpty()) return@LaunchedEffect
-        val minX = points.minOf { it.lon * lonScale }.toFloat()
-        val maxX = points.maxOf { it.lon * lonScale }.toFloat()
-        val minY = points.minOf { -it.lat }.toFloat()
-        val maxY = points.maxOf { -it.lat }.toFloat()
+        val latLons = if (points.isEmpty()) highlightedRouteCoordinates else points.map { it.lat to it.lon }
+        if (latLons.isEmpty()) return@LaunchedEffect
+        val minX = latLons.minOf { it.second * lonScale }.toFloat()
+        val maxX = latLons.maxOf { it.second * lonScale }.toFloat()
+        val minY = latLons.minOf { -it.first }.toFloat()
+        val maxY = latLons.maxOf { -it.first }.toFloat()
         val routeWidth = (maxX - minX).coerceAtLeast(.005f)
         val routeHeight = (maxY - minY).coerceAtLeast(.005f)
         scale = (minOf(size.width / routeWidth, size.height / routeHeight) * .72f).coerceAtMost(18000f)
