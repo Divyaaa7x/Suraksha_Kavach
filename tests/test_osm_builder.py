@@ -96,3 +96,11 @@ def test_pilot_pack_grid_index_finds_nearest_point():
     index = build_osm_pack.GridIndex({"near": (17.0, 78.0), "far": (18.0, 79.0)})
     assert index.nearest(17.001, 78.001, 1500)[0] == "near"
     assert index.nearest(17.0, 78.0, 100)[0] == "near"
+
+
+def test_release_data_asset_path_is_opt_in(monkeypatch, tmp_path):
+    monkeypatch.delenv("KAVACH_RELEASE_DATA_DIR", raising=False)
+    assert build_osm_pack.routes_asset_path() == build_osm_pack.ANDROID_ROUTES
+    release_data = tmp_path / "release-data"
+    monkeypatch.setenv("KAVACH_RELEASE_DATA_DIR", str(release_data))
+    assert build_osm_pack.routes_asset_path() == release_data / "maps" / "telangana-routes.mapdata"

@@ -69,10 +69,9 @@ class KavachApp : Application() {
                     if (metadata.routesArchiveSha256 != null && metadata.routesDatabaseSha256 != null &&
                         metadata.routesDatabaseBytes != null) {
                         try {
-                            val routes = installCompressedDatabase(
-                                "maps/telangana-routes.mapdata", "telangana-routes",
+                            val routes = installOfflineRoutes(
                                 metadata.routesArchiveSha256, metadata.routesDatabaseSha256,
-                                metadata.routesDatabaseBytes, ::verifyOfflineRouteDatabase,
+                                metadata.routesDatabaseBytes,
                             )
                             current = current.copy(offlineRouteDatabase = routes)
                         } catch (e: Exception) {
@@ -96,8 +95,38 @@ class KavachApp : Application() {
         )
     }
 
+    private fun installOfflineRoutes(archiveHash: String, databaseHash: String, expectedBytes: Long): File? {
+        val cached = File(filesDir, "telangana-routes-$databaseHash.sqlite")
+        if (cached.isFile && cached.length() == expectedBytes && sha256(cached) == databaseHash) {
+            verifyOfflineRouteDatabase(cached)
+            return cached
+        }
+        val bundled = try {
+            assets.open("maps/telangana-routes.mapdata")
+        } catch (_: java.io.FileNotFoundException) {
+            null
+        }
+        val external = File(filesDir, "maps/telangana-routes.mapdata")
+        val source = bundled ?: if (external.isFile) FileInputStream(external) else null
+        if (source == null) {
+            Log.i("KavachApp", "Statewide offline route archive is not installed; pilot routes remain available")
+            return null
+        }
+        return installCompressedDatabase(source, "telangana-routes", archiveHash, databaseHash,
+            expectedBytes, ::verifyOfflineRouteDatabase)
+    }
+
     private fun installCompressedDatabase(
         assetPath: String,
+        filePrefix: String,
+        archiveHash: String,
+        databaseHash: String,
+        expectedBytes: Long,
+        verify: (File) -> Unit,
+    ): File = installCompressedDatabase(assets.open(assetPath), filePrefix, archiveHash, databaseHash, expectedBytes, verify)
+
+    private fun installCompressedDatabase(
+        archive: java.io.InputStream,
         filePrefix: String,
         archiveHash: String,
         databaseHash: String,
@@ -106,6 +135,7 @@ class KavachApp : Application() {
     ): File {
         val database = File(filesDir, "$filePrefix-$databaseHash.sqlite")
         if (database.isFile && database.length() == expectedBytes && sha256(database) == databaseHash) {
+            archive.close()
             verify(database)
             return database
         }
@@ -114,7 +144,7 @@ class KavachApp : Application() {
         val archiveDigest = MessageDigest.getInstance("SHA-256")
         val databaseDigest = MessageDigest.getInstance("SHA-256")
         var written = 0L
-        GZIPInputStream(DigestInputStream(assets.open(assetPath), archiveDigest)).use { input ->
+        GZIPInputStream(DigestInputStream(archive, archiveDigest)).use { input ->
             FileOutputStream(temp).use { output ->
                 val buffer = ByteArray(64 * 1024)
                 while (true) {

@@ -15,6 +15,12 @@ android {
         noCompress += "mapdata"
     }
 
+    // The statewide route archive is a separately distributed release artifact (~297 MB).
+    // Set KAVACH_RELEASE_DATA_DIR to its directory to embed the signed, hash-pinned archive.
+    val routeDataDir = providers.environmentVariable("KAVACH_RELEASE_DATA_DIR").orNull
+        ?: rootProject.file("../release-data").absolutePath
+    sourceSets.getByName("main").assets.srcDir(file(routeDataDir))
+
     defaultConfig {
         applicationId = "org.kavach"
         minSdk = 26          // Android 8.0; the dossier's 2 GB Go-class target still runs this

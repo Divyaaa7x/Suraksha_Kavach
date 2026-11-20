@@ -55,6 +55,15 @@ PLACE_KINDS = {"village", "town", "city", "hamlet"}
 HEALTH_KINDS = {"hospital", "clinic"}
 WATER_KINDS = {"river", "stream", "canal", "drain"}
 CROSSING_TAGS = ("bridge", "culvert", "ford")
+
+
+def routes_asset_path() -> Path:
+    """Choose the opt-in release-data directory, otherwise the ordinary APK asset path."""
+    if "KAVACH_RELEASE_DATA_DIR" in os.environ:
+        return Path(os.environ["KAVACH_RELEASE_DATA_DIR"]) / "maps" / "telangana-routes.mapdata"
+    return ANDROID_ROUTES
+
+
 LICENSES = """REAL DATA PACK, built from OpenStreetMap.
 (c) OpenStreetMap contributors. Data is available under the Open Database License (ODbL) 1.0:
 https://www.openstreetmap.org/copyright  — keep this attribution with any map or export.
@@ -302,7 +311,7 @@ def main() -> None:
         raise FileNotFoundError(
             f"{TELANGANA_MAP} missing; build it with `python scripts/build_telangana_map.py <south-zone.osm.pbf>`"
         )
-    map_metadata = build_offline_map_metadata(TELANGANA_MAP, ANDROID_MAP, TELANGANA_ROUTES, ANDROID_ROUTES)
+    map_metadata = build_offline_map_metadata(TELANGANA_MAP, ANDROID_MAP, TELANGANA_ROUTES, routes_asset_path())
 
     out = build_pack(OUT, graph, policy, pack_version=PACK_VERSION, licenses_text=LICENSES,
                      extra_files={"features.json": features_json, "criticality.json": crit_json,
