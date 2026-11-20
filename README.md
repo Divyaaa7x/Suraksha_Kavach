@@ -4,6 +4,12 @@
 
 Offline-first, human-approved decision support for flood-related road access in rural Telangana. The prototype combines an Android field app with a local command hub. It is not an emergency dispatch service or a road-safety certification system.
 
+## Try the Android prototype
+
+Download the route-enabled demo APK from the [latest prototype prerelease](https://github.com/Divyaaa7x/Suraksha_Kavach/releases/tag/v0.1.0-prototype.1): [direct APK download](https://github.com/Divyaaa7x/Suraksha_Kavach/releases/download/v0.1.0-prototype.1/app-demo-debug.apk) (about 381 MB). It includes the offline India overview and Telangana map plus statewide OSM route data. Install on Android 8.0 (API 26) or newer; allow your browser/file manager to install APKs if prompted. First launch extracts the route database and needs additional free storage.
+
+This is a **demo/debug prototype**, not an operational or emergency-response app. It uses synthetic demo identities; statewide crossing statuses are unverified; route results need human field verification and are not navigation guidance. Long strict searches may time out, memory use exceeded 200 MB in testing, and 2 GB devices have not been validated. See the [release notes](https://github.com/Divyaaa7x/Suraksha_Kavach/releases/tag/v0.1.0-prototype.1) for the APK checksum and complete limitations.
+
 ## Current implementation
 
 - **Android field app:** Compose screens for readiness, a pan/zoom India states overview, a statewide offline Telangana road map with waterways, settlements, facilities and mapped administrative boundaries, reports, route comparison, isolation/inspection analysis, private-LAN hub sync, Nearby Connections, and event audit. The app verifies its signed pack and map before showing data. No ML model is required.
@@ -31,6 +37,12 @@ python -m uvicorn kavach.api:create_app --factory --app-dir server --host 0.0.0.
 ```
 
 Open `http://127.0.0.1:8000/`. The default hub uses the OSM pack; the demo-pack build is for tests and explicit synthetic scenarios. For the demo pack, set `KAVACH_PACK_DIR=data/packs/kavach-demo-synthetic` before starting the hub. To protect a private-LAN demo, configure a random token before starting the server (PowerShell: `$env:KAVACH_HUB_TOKEN = [guid]::NewGuid().ToString('N')`). Tokens shorter than 32 UTF-8 bytes are rejected. Enter it in the dashboard's Hub connection security panel and Android Sync screen. Health remains public for diagnostics. Without a token, all data routes are unauthenticated. The sample command binds to all interfaces; do not expose it to the internet, and use TLS for remote access.
+
+## Website hosting (Cloudflare Pages)
+
+The coordinator dashboard currently lives at `/` and its `/v1/*` API is served by the FastAPI app in the same process. Cloudflare Pages can host a static copy of the dashboard, but it does **not** deploy this FastAPI service or its SQLite event store. A Pages-only deployment is therefore a static preview unless an API is separately deployed and configured; do not point it at the unauthenticated local hub or expose bearer tokens over plain HTTP.
+
+To create a static Pages preview from this repository, create a Pages project connected to the GitHub repository, set the production branch to `main`, leave the build command empty, and set the build output directory to `server/static`. The checked-in `index.html` and its local assets will be served, but API features require a separately hosted, TLS-protected backend. The current app has no Cloudflare API/SQLite deployment configuration; use the local hub for private demos until authenticated production hosting, durable storage, and API URL configuration are implemented and verified. Do not describe the Pages preview as a fully hosted working coordinator system yet.
 
 ## Android app
 
