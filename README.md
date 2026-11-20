@@ -1,5 +1,7 @@
 # SURAKSHA KAVACH
 
+[![CI](https://github.com/Divyaaa7x/Suraksha_Kavach/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Divyaaa7x/Suraksha_Kavach/actions/workflows/ci.yml)
+
 Offline-first, human-approved decision support for flood-related road access in rural Telangana. The prototype combines an Android field app with a local command hub. It is not an emergency dispatch service or a road-safety certification system.
 
 ## Current implementation
