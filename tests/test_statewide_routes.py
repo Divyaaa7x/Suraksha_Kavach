@@ -98,6 +98,22 @@ def test_database_hash_must_match_signed_hash(tmp_path):
         StatewideRoutes(path, "0" * 64)
 
 
+def test_database_accepts_compact_adjacency_index_names(tmp_path):
+    path = tmp_path / "compact-routes.sqlite"
+    route_db(path)
+    with sqlite3.connect(path) as db:
+        db.executescript("""
+          DROP INDEX route_edges_from;
+          DROP INDEX route_edges_to;
+          DROP INDEX route_edges_crossing;
+          CREATE INDEX route_edges_compact_from ON route_edges(u);
+          CREATE INDEX route_edges_compact_to ON route_edges(v);
+          CREATE INDEX route_edges_compact_crossing ON route_edges(crossing_way_id);
+        """)
+    routes = StatewideRoutes(path)
+    assert routes.compute("1", "2", policy="unverified_warning")["result"] == "ROUTE_CANDIDATE"
+
+
 def test_invalid_vehicle_fails_closed(routes):
     assert "error" in routes.compute("1", "2", vehicle="tractor")
 

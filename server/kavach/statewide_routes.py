@@ -52,10 +52,15 @@ class StatewideRoutes:
             self.db.close()
             raise ValueError("statewide route database metadata is incomplete")
         indexes = {r[0] for r in self.db.execute("SELECT name FROM sqlite_master WHERE type='index'")}
-        expected_indexes = {"route_edges_from", "route_edges_to", "route_edges_crossing", "route_places_name"}
-        if not expected_indexes <= indexes:
+        expected_index_groups = (
+            {"route_edges_from", "route_edges_compact_from"},
+            {"route_edges_to", "route_edges_compact_to"},
+            {"route_edges_crossing", "route_edges_compact_crossing"},
+            {"route_places_name"},
+        )
+        if missing := [sorted(group) for group in expected_index_groups if not (group & indexes)]:
             self.db.close()
-            raise ValueError(f"statewide route database missing indexes: {sorted(expected_indexes - indexes)}")
+            raise ValueError(f"statewide route database missing indexes: {missing}")
 
     def search_places(self, query: str, limit: int = 20) -> list[dict]:
         query = query.strip()

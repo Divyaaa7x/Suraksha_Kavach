@@ -90,3 +90,9 @@ def test_map_metadata_builder_removes_stale_route_asset_when_no_route_database(t
     ))
     assert "routes_archive_sha256" not in metadata
     assert not route_archive.exists()
+
+
+def test_pilot_pack_grid_index_finds_nearest_point():
+    index = build_osm_pack.GridIndex({"near": (17.0, 78.0), "far": (18.0, 79.0)})
+    assert index.nearest(17.001, 78.001, 1500)[0] == "near"
+    assert index.nearest(17.0, 78.0, 100)[0] == "near"

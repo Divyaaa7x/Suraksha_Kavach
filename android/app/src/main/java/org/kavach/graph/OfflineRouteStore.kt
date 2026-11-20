@@ -3,6 +3,7 @@ package org.kavach.graph
 import android.database.sqlite.SQLiteDatabase
 import java.io.File
 import java.util.PriorityQueue
+import android.os.SystemClock
 import kotlin.math.asin
 import kotlin.math.cos
 import kotlin.math.sin
@@ -98,11 +99,16 @@ class OfflineRouteStore(private val file: File) {
             queue.add(QueueNode(routeHeuristicSeconds(startCoordinate.first, startCoordinate.second,
                 target.first, target.second, maximumSpeed), 0.0, start))
             var expanded = 0
+            val searchStartedAt = SystemClock.elapsedRealtime()
             while (queue.isNotEmpty()) {
                 val (_, cost, node) = queue.remove()
                 if (cost != best[node]) continue
                 if (node == goal) break
-                if (++expanded > MAX_EXPANSIONS) throw IllegalStateException("Route search reached its safety limit; no route returned")
+                if (++expanded > MAX_EXPANSIONS || SystemClock.elapsedRealtime() - searchStartedAt > MAX_SEARCH_MILLIS) {
+                    return RouteResult("SEARCH_LIMIT", emptyList(), emptyList(), null,
+                        excluded.values.toList(), emptyList(), "osm-statewide", policy,
+                        "Search reached its safe time or work limit. No route result was produced; try a closer destination or request field verification.")
+                }
                 visit(db, "e.u=?", node, reverse = false, vehicle, policy, statuses, excluded) { next, edge, seconds, crossingId, status, lat, lon ->
                     relax(node, next, edge, seconds, crossingId, status, lat, lon, target, maximumSpeed, cost, best, previous, queue)
                 }
@@ -204,6 +210,7 @@ class OfflineRouteStore(private val file: File) {
 
     companion object {
         private const val MAX_EXPANSIONS = 1_000_000
+        private const val MAX_SEARCH_MILLIS = 15_000L
         private const val MAX_RECORDED_EDGES = 200
         // The statewide builder's fastest emitted road profile is 90 km/h; keep A* admissible.
         private const val MAX_ROUTE_SPEED_KMH = 90.0

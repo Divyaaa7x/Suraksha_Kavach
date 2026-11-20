@@ -149,9 +149,19 @@ class KavachApp : Application() {
                     if (rows < minimum) throw IllegalStateException("Statewide route database is missing $table data")
                 }
             }
-            for (index in listOf("route_edges_from", "route_edges_to", "route_edges_crossing", "route_places_name")) {
-                routes.rawQuery("SELECT 1 FROM sqlite_master WHERE type='index' AND name=?", arrayOf(index)).use { cursor ->
-                    if (!cursor.moveToFirst()) throw IllegalStateException("Statewide route index $index is missing")
+            val requiredIndexNames = listOf(
+                listOf("route_edges_from", "route_edges_compact_from"),
+                listOf("route_edges_to", "route_edges_compact_to"),
+                listOf("route_edges_crossing", "route_edges_compact_crossing"),
+                listOf("route_places_name"),
+            )
+            for (names in requiredIndexNames) {
+                val placeholders = names.joinToString(",") { "?" }
+                routes.rawQuery(
+                    "SELECT 1 FROM sqlite_master WHERE type='index' AND name IN ($placeholders) LIMIT 1",
+                    names.toTypedArray(),
+                ).use { cursor ->
+                    if (!cursor.moveToFirst()) throw IllegalStateException("Statewide route index for ${names.last()} is missing")
                 }
             }
             routes.rawQuery("SELECT 1 FROM route_metadata WHERE key='source_sha256' LIMIT 1", null).use { cursor ->
