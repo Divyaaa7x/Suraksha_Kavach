@@ -45,6 +45,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -244,6 +245,10 @@ private fun MapScreen(vm: KavachViewModel) {
     val graph = vm.graph() ?: return
     val areas = vm.indiaAreas()
     val selectedArea = areas.firstOrNull { it.code == vm.selectedMapArea }
+    val mapHeight = (LocalConfiguration.current.screenHeightDp * .45f).coerceIn(280f, 420f).dp
+    val crossingOptions = remember(graph) {
+        graph.crossings.keys.sorted().map { id -> id to "$id · ${graph.crossings[id]?.kind ?: "crossing"}" }
+    }
     if (!vm.showLocalDetail) {
         Section("India · ${areas.size} states and union territories") {
             IndiaOverviewMap(areas, vm.selectedMapArea, onSelect = { vm.selectedMapArea = it })
@@ -275,7 +280,11 @@ private fun MapScreen(vm: KavachViewModel) {
                     selectedCrossing = vm.selectedCrossing,
                     highlightedEdges = vm.highlightedRouteEdges,
                     onSelectCrossing = { vm.selectedCrossing = it },
+                    mapHeight = mapHeight,
                 )
+                NodePicker("Pilot crossing", crossingOptions, vm.selectedCrossing.orEmpty()) {
+                    vm.selectedCrossing = it
+                }
                 Text("Pinch to zoom · drag to explore · OSM map",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -285,7 +294,8 @@ private fun MapScreen(vm: KavachViewModel) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
                 RealMap(graph, vm.features(), vm.statuses, vm.selectedCrossing,
-                    onSelect = { vm.selectedCrossing = it }, highlightedEdges = vm.highlightedRouteEdges)
+                    onSelect = { vm.selectedCrossing = it }, highlightedEdges = vm.highlightedRouteEdges,
+                    mapHeight = mapHeight)
             }
             if (vm.highlightedRouteEdges.isNotEmpty()) {
                 val matched = vm.highlightedRouteEdges.count { it in graph.edges }
@@ -371,7 +381,7 @@ private fun NodePicker(label: String, nodes: List<Pair<String, String>>, selecte
     var open by remember { mutableStateOf(false) }
     Text(label, Modifier.padding(top = 6.dp))
     OutlinedButton(onClick = { open = !open }, modifier = Modifier.fillMaxWidth()) {
-        Text(nodes.firstOrNull { it.first == selected }?.second ?: selected)
+        Text(nodes.firstOrNull { it.first == selected }?.second ?: selected.ifBlank { "Choose a crossing" })
     }
     if (open) {
         LazyColumn(Modifier.fillMaxWidth().height(200.dp).border(1.dp, Color(0xFFC9CED6), RoundedCornerShape(8.dp))) {

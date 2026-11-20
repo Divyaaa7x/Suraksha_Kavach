@@ -16,16 +16,27 @@
   h1 { margin:0; font-size:18px; }
   .banner { background:#fff3cd; color:#533f03; padding:8px 16px; font-size:13px; }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .banner { background:#3a2f0b; color:#ffe9a8; } }
-  main { display:grid; grid-template-columns: minmax(0,2fr) minmax(0,1fr); gap:12px; padding:12px; }
+  main { display:grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap:12px; padding:12px; }
   @media (max-width: 800px) { main { grid-template-columns: 1fr; } }
   .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px; }
+  .india-overview { margin:12px 12px 0; background:var(--card); border:1px solid var(--line); border-radius:10px; }
+  .india-overview > summary { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:12px 14px; cursor:pointer; font-weight:600; list-style:none; }
+  .india-overview[open] { margin-bottom:0; }
+  .india-overview > summary::-webkit-details-marker { display:none; }
+  .india-overview > summary::after { content:'+'; color:var(--muted); font-size:20px; line-height:1; }
+  .india-overview[open] > summary::after { content:'−'; }
+  .overview-content { margin:0 8px 8px; }
   h2 { font-size:15px; margin:0 0 8px; }
   #mapwrap { position:relative; }
   canvas#india { width:100%; height:320px; display:block; background:#eef1ee; border-radius:8px; }
-  canvas#map { width:100%; height:560px; display:block; background:#eef1ee; border-radius:8px; cursor:grab; touch-action:none; }
+  canvas#map { width:100%; height:clamp(360px, 62vh, 680px); display:block; background:#eef1ee; border:1px solid #d7dfd8; border-radius:12px; cursor:grab; touch-action:none; }
   canvas#map:focus-visible { outline:3px solid #087e68; outline-offset:2px; }
-  .map-controls { position:absolute; top:10px; right:10px; display:grid; gap:6px; width:42px; }
-  .map-controls button { margin:0; min-height:42px; padding:6px; background:var(--card); color:var(--fg); box-shadow:0 1px 5px #0003; }
+  .map-controls { position:absolute; top:10px; right:10px; display:grid; gap:6px; width:44px; }
+  .map-controls button { margin:0; min-height:44px; padding:6px; background:var(--card); color:var(--fg); box-shadow:0 1px 5px #0003; transition:transform 120ms ease-out, background-color 140ms ease-out; }
+  .map-controls button:active { transform:scale(.96); }
+  @media (hover:hover) and (pointer:fine) { .map-controls button:hover { background:var(--line); } }
+  .map-scope { margin:6px 2px 0; }
+  .banner { border-left:3px solid var(--ok); }
   .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
   .attrib { position:absolute; right:8px; bottom:6px; font-size:11px; background:rgba(255,255,255,.85); color:#222; padding:2px 6px; border-radius:4px; }
   .legend span { display:inline-block; margin:2px 8px 2px 0; font-size:12px; }
@@ -43,24 +54,29 @@
   .review-row { border-top:1px solid var(--line); padding:10px 0; }
   .review-actions { display:flex; gap:8px; flex-wrap:wrap; }
   .review-actions button { width:auto; margin-top:6px; }
+  button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-visible { outline:3px solid #087e68; outline-offset:2px; }
+  @media (prefers-reduced-motion: reduce) { .map-controls button { transition:none; } }
 </style>
 </head>
 <body>
 <header>
   <h1>SURAKSHA KAVACH · Command Hub <span class="muted" id="hstat">connecting…</span></h1>
 </header>
-<div class="banner">Decision support only. A human approves every access decision. Map data: OpenStreetMap (ODbL). Crossing status is UNKNOWN until a report or approval says otherwise. Works with the internet off.</div>
-<section class="card" style="margin:12px 12px 0">
-  <h2>India overview · state and union territory reference boundaries</h2>
-  <canvas id="india" aria-label="Offline reference map of Indian states and union territories"></canvas>
-  <label>Selected state or union territory <select id="indiaState"></select></label>
-  <p class="muted">India is an overview. Telangana includes offline roads, waterways, places and district boundaries; route analysis and crossing status remain limited to Medak / Kamareddy.</p>
-</section>
+<div class="banner">Decision support only · OSM data is not a field inspection · crossings remain unknown until verified</div>
+<details id="indiaPanel" class="india-overview">
+  <summary><span>India overview</span><span class="muted" id="indiaSelection">Telangana selected</span></summary>
+  <section class="card overview-content">
+    <h2>State and union territory reference boundaries</h2>
+    <canvas id="india" aria-hidden="true"></canvas>
+    <label>Selected state or union territory <select id="indiaState"></select></label>
+    <p class="muted">Telangana has the offline detail map. Route analysis is limited to the Medak / Kamareddy pilot graph.</p>
+  </section>
+</details>
 <main>
   <section class="card">
     <h2>Telangana · offline map</h2>
     <div id="mapwrap">
-      <canvas id="map" tabindex="0" role="application" aria-label="Interactive Telangana road map" aria-describedby="mapHelp"></canvas>
+      <canvas id="map" tabindex="0" role="application" aria-label="Interactive Telangana road map" aria-describedby="mapHelp mapScaleText"></canvas>
       <div class="map-controls" role="group" aria-label="Map controls">
         <button id="zoomIn" type="button" aria-label="Zoom in">+</button>
         <button id="zoomOut" type="button" aria-label="Zoom out">−</button>
@@ -69,7 +85,9 @@
       <div class="attrib">© OpenStreetMap contributors · ODbL</div>
     </div>
     <div class="legend" id="legend"></div>
+    <p class="muted map-scope">Statewide map display · routing limited to Medak / Kamareddy · OSM is not a safety inspection</p>
     <p class="sr-only" id="mapHelp">Use arrow keys to pan, plus and minus to zoom, and Home to fit the map. Select a crossing below to read its current status.</p>
+    <p class="sr-only" id="mapScaleText"></p>
     <label for="crossingPicker">Pilot crossing</label>
     <select id="crossingPicker" aria-label="Select a pilot crossing"><option value="">Choose a crossing</option></select>
     <div class="detail" id="detail" role="status" aria-live="polite">Select a marked pilot crossing to see its status and what depends on it.</div>
@@ -118,7 +136,7 @@ const ROAD_W = { motorway:3, trunk:3, primary:2.5, secondary:2, tertiary:1.6, un
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-let G = null, F = null, INDIA = null, selectedState = 'IN-TG', ST = {}, view = {x:0, y:0, k:1}, bounds, roadPath = null, crossEdges = [], selected = null, routeEdges = new Set(), offlineMap = null, mapTimer = null, mapRequest = 0, detailRequest = 0;
+let G = null, F = null, INDIA = null, selectedState = 'IN-TG', ST = {}, view = {x:0, y:0, k:1}, bounds, roadPath = null, crossEdges = [], selected = null, routeEdges = new Set(), offlineMap = null, mapTimer = null, mapRequest = 0, detailRequest = 0, cameraFrame = 0;
 const canvas = $('map'), ctx = canvas.getContext('2d');
 const indiaCanvas = $('india'), indiaCtx = indiaCanvas.getContext('2d');
 
@@ -144,8 +162,22 @@ function fit() {
   const w = canvas.clientWidth, h = canvas.clientHeight;
   const [x0,y0] = toXY(bounds.maxLa, bounds.minLo), [x1,y1] = toXY(bounds.minLa, bounds.maxLo);
   const k = Math.min(w / (x1 - x0), h / (y1 - y0)) * 0.95;
-  view = { k, x: w/2 - ((x0+x1)/2) * k, y: h/2 - ((y0+y1)/2) * k };
+  moveCamera({ k, x: w/2 - ((x0+x1)/2) * k, y: h/2 - ((y0+y1)/2) * k });
   scheduleOfflineMap();
+}
+
+function moveCamera(next) {
+  cancelAnimationFrame(cameraFrame);
+  const start = {...view}, reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduced) { view = next; draw(); return; }
+  const began = performance.now(), duration = 180;
+  const tick = (now) => {
+    const t = Math.min(1, (now - began) / duration), eased = 1 - (1 - t) ** 3;
+    view = {k:start.k + (next.k-start.k)*eased, x:start.x + (next.x-start.x)*eased, y:start.y + (next.y-start.y)*eased};
+    draw();
+    if (t < 1) cameraFrame = requestAnimationFrame(tick); else { cameraFrame = 0; view = next; }
+  };
+  cameraFrame = requestAnimationFrame(tick);
 }
 
 function focusRoute(edgeIds) {
@@ -157,9 +189,8 @@ function focusRoute(edgeIds) {
   const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
   const rw = Math.max(x1 - x0, 0.001), rh = Math.max(y1 - y0, 0.001);
   const w = canvas.clientWidth, h = canvas.clientHeight;
-  view.k = Math.min(w / rw, h / rh) * 0.72;
-  view.x = w / 2 - ((x0 + x1) / 2) * view.k;
-  view.y = h / 2 - ((y0 + y1) / 2) * view.k;
+  const k = Math.min(w / rw, h / rh) * 0.72;
+  moveCamera({k, x:w / 2 - ((x0 + x1) / 2) * k, y:h / 2 - ((y0 + y1) / 2) * k});
   return valid.length / 2;
 }
 
@@ -258,11 +289,42 @@ function draw() {
       ctx.fillText(n.name, sx + 6, sy - 6);
     }
   }
+  drawScale(w, h);
+}
+
+function drawScale(w, h) {
+  if (!offlineMap || selectedState !== 'IN-TG' || view.k <= 0) {
+    $('mapScaleText').textContent = '';
+    return;
+  }
+  const targetWidth = Math.min(76, w * .22);
+  const rawKm = targetWidth * 111.32 / view.k;
+  const magnitude = 10 ** Math.floor(Math.log10(Math.max(rawKm, .0001)));
+  const distanceKm = [5, 2, 1].map(n => n * magnitude).find(n => n <= rawKm) || magnitude;
+  const barWidth = distanceKm * view.k / 111.32;
+  const label = distanceKm < 1 ? `${Math.round(distanceKm * 1000)} m` : `${distanceKm} km`;
+  const x = 14, baseline = h - 22;
+  ctx.save();
+  ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+  ctx.font = '12px system-ui';
+  const labelWidth = ctx.measureText(label).width;
+  ctx.fillStyle = 'rgba(255,255,255,.92)';
+  ctx.fillRect(x - 6, baseline - 31, barWidth + labelWidth + 23, 38);
+  ctx.fillStyle = '#34443d';
+  ctx.fillText(label, x + barWidth + 7, baseline - 14);
+  ctx.strokeStyle = '#34443d'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(x, baseline); ctx.lineTo(x + barWidth, baseline);
+  ctx.moveTo(x, baseline - 6); ctx.lineTo(x, baseline + 1);
+  ctx.moveTo(x + barWidth, baseline - 6); ctx.lineTo(x + barWidth, baseline + 1);
+  ctx.stroke();
+  ctx.restore();
+  $('mapScaleText').textContent = `Map scale: ${label}`;
 }
 
 function drawIndia() {
   if (!INDIA) return;
   const w = indiaCanvas.clientWidth, h = indiaCanvas.clientHeight;
+  if (!w || !h) return;
   indiaCanvas.width = w * devicePixelRatio; indiaCanvas.height = h * devicePixelRatio;
   indiaCtx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
   indiaCtx.clearRect(0, 0, w, h);
@@ -283,7 +345,13 @@ function setIndiaOverview(data) {
   INDIA = data;
   $('indiaState').innerHTML = data.features.map(a => `<option value="${esc(a.code)}">${esc(a.name)}</option>`).join('');
   $('indiaState').value = selectedState;
-  $('indiaState').addEventListener('change', () => { selectedState = $('indiaState').value; bounds=stateBounds(); fit(); drawIndia(); draw(); });
+  $('indiaSelection').textContent = `${data.features.find(a => a.code === selectedState)?.name || selectedState} selected`;
+  $('indiaPanel').addEventListener('toggle', () => { if ($('indiaPanel').open) drawIndia(); });
+  $('indiaState').addEventListener('change', () => {
+    selectedState = $('indiaState').value;
+    $('indiaSelection').textContent = `${data.features.find(a => a.code === selectedState)?.name || selectedState} selected`;
+    bounds=stateBounds(); fit(); drawIndia(); draw();
+  });
   drawIndia();
 }
 
@@ -308,9 +376,8 @@ canvas.addEventListener('wheel', (ev) => {
 }, { passive: false });
 
 function zoomAt(f, px = canvas.clientWidth / 2, py = canvas.clientHeight / 2) {
-  view.x = px - (px - view.x) * f; view.y = py - (py - view.y) * f;
-  view.k = Math.max(1, Math.min(12000, view.k * f));
-  draw(); scheduleOfflineMap();
+  moveCamera({x:px - (px-view.x)*f, y:py - (py-view.y)*f, k:Math.max(1,Math.min(12000,view.k*f))});
+  scheduleOfflineMap();
 }
 $('zoomIn').addEventListener('click', () => zoomAt(1.25));
 $('zoomOut').addEventListener('click', () => zoomAt(1 / 1.25));
@@ -372,7 +439,7 @@ function bboxOf(nodes) {
 
 function scheduleOfflineMap(){clearTimeout(mapTimer);mapTimer=setTimeout(loadOfflineMap,180);}
 async function loadOfflineMap(){
-  if(selectedState!=='IN-TG'||!INDIA){offlineMap=null;draw();return;}
+  if(selectedState!=='IN-TG'||!INDIA){offlineMap=null;$('mapSource').textContent='No local road detail is installed for this selection.';draw();return;}
   const w=canvas.clientWidth,h=canvas.clientHeight,corners=[[0,0],[w,h]].map(([x,y])=>{const [px,py]=[(x-view.x)/view.k,(y-view.y)/view.k],cy=(bounds.minLa+bounds.maxLa)/2,cx=(bounds.minLo+bounds.maxLo)/2;return[cx+px/Math.cos(cy*Math.PI/180),cy-py];});
   const west=Math.max(76.9,Math.min(...corners.map(p=>p[0]))),east=Math.min(82.1,Math.max(...corners.map(p=>p[0]))),south=Math.max(15.4,Math.min(...corners.map(p=>p[1]))),north=Math.min(20.4,Math.max(...corners.map(p=>p[1])));
   if(east<=west||north<=south)return;

@@ -11,6 +11,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Text
 import androidx.compose.animation.core.animate
@@ -63,7 +66,9 @@ import java.nio.ByteOrder
 import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.ln
+import kotlin.math.log10
 import kotlin.math.pow
+import kotlin.math.roundToInt
 
 private data class OfflineRoad(val id: Long, val highway: String, val name: String, val inState: Boolean,
     val minZoom: Int, val points: List<Pair<Double, Double>>)
@@ -355,8 +360,9 @@ fun TelanganaOfflineMap(
                 }
                 val occupied = ArrayList<Rect>()
                 val textStyle = TextStyle(fontSize = 10.sp, color = Color(0xFF34443D))
-                snapshot.places.sortedBy { when (it.kind) { "city" -> 0; "town" -> 1; "hospital", "clinic", "doctors" -> 2; "village" -> 3; "road" -> 4; else -> 5 } }.forEach { place ->
+                snapshot.places.sortedBy { when (it.kind) { "city" -> 0; "town" -> 1; "hospital" -> 2; "clinic", "doctors" -> 3; "village" -> 4; "road" -> 5; else -> 6 } }.forEach { place ->
                     if (place.name.isBlank()) return@forEach
+                    if (routeWays.isNotEmpty() && place.kind !in setOf("city", "town", "hospital")) return@forEach
                     val labelZoom = when (place.kind) {
                         "city" -> 7; "town" -> 9; "village" -> 11; "hamlet", "suburb", "neighbourhood", "locality" -> 13
                         "hospital", "clinic", "doctors" -> 11; "road" -> 9; else -> 16
@@ -390,6 +396,11 @@ fun TelanganaOfflineMap(
                 }
             }
         }
+        Text("N  ↑", style = TextStyle(fontSize = 11.sp, color = Color(0xFF34443D)),
+            modifier = Modifier.align(Alignment.TopStart).padding(10.dp)
+                .background(Color(0xEEFFFFFF), RoundedCornerShape(8.dp)).padding(horizontal = 8.dp, vertical = 5.dp)
+                .semantics { contentDescription = "Map orientation: north is up" })
+        MapScaleIndicator(scale, Modifier.align(Alignment.BottomStart).padding(8.dp))
         Text(if (mapUnavailable) "Offline map data unavailable" else "© OpenStreetMap contributors · ODbL", fontSize = 10.sp,
             modifier = Modifier.align(Alignment.BottomEnd).padding(6.dp)
                 .background(Color(0xDDFFFFFF)).padding(horizontal = 5.dp, vertical = 2.dp))
@@ -401,6 +412,32 @@ fun TelanganaOfflineMap(
             FilledTonalIconButton(onClick = { reset++; scale = 0f },
                 modifier = Modifier.semantics { contentDescription = "Show all Telangana" }) { Text("◎") }
         }
+    }
+}
+
+@Composable
+private fun MapScaleIndicator(scale: Float, modifier: Modifier = Modifier) {
+    if (scale <= 0f) return
+    val density = LocalDensity.current
+    val rawDistanceKm = with(density) { 88.dp.toPx().toDouble() } * 111.32 / scale
+    val targetKm = rawDistanceKm.coerceAtLeast(0.0001)
+    val magnitude = 10.0.pow(floor(log10(targetKm)))
+    val distanceKm = listOf(5.0, 2.0, 1.0).map { it * magnitude }.first { it <= targetKm }
+    val barWidth = with(density) { (distanceKm * scale / 111.32).toFloat().toDp() }
+    val label = if (distanceKm < 1.0) "${(distanceKm * 1000).roundToInt()} m" else "${distanceKm.toInt()} km"
+    Row(
+        modifier.background(Color(0xEEFFFFFF), RoundedCornerShape(8.dp)).padding(horizontal = 8.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Canvas(Modifier.width(barWidth).height(10.dp).semantics { contentDescription = "Map scale: $label" }) {
+            val stroke = 2.dp.toPx()
+            val y = size.height - stroke
+            drawLine(Color(0xFF34443D), Offset(0f, y), Offset(size.width, y), stroke)
+            drawLine(Color(0xFF34443D), Offset(0f, 0f), Offset(0f, size.height), stroke)
+            drawLine(Color(0xFF34443D), Offset(size.width, 0f), Offset(size.width, size.height), stroke)
+        }
+        Text(label, style = TextStyle(fontSize = 10.sp, color = Color(0xFF34443D)))
     }
 }
 
