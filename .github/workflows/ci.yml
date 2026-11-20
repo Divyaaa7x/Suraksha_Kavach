@@ -37,7 +37,19 @@ jobs:
           packages: "platform-tools platforms;android-34 build-tools;34.0.0"
       - uses: gradle/actions/setup-gradle@v6
       - run: chmod +x android/gradlew
-      - run: ./android/gradlew --no-daemon -p android testDebugUnitTest assembleDebug
+      - run: ./android/gradlew --no-daemon -p android testDemoDebugUnitTest testProductionDebugUnitTest assembleDemoDebug
+      - name: Confirm production release refuses missing provisioning
+        shell: bash
+        run: |
+          if ./android/gradlew --no-daemon -p android assembleProductionRelease > /tmp/production-release.log 2>&1; then
+            echo "Production release unexpectedly built without provisioning" >&2
+            exit 1
+          fi
+          grep -q "Production release requires" /tmp/production-release.log
+          if find android/app/build/outputs/apk/production/release -type f -name '*.apk' 2>/dev/null | grep -q .; then
+            echo "A production APK exists after the rejected release task" >&2
+            exit 1
+          fi
 
   dashboard:
     name: Dashboard JavaScript syntax

@@ -1,5 +1,6 @@
 package org.kavach.pack
 
+import org.kavach.BuildConfig
 import org.kavach.core.Crypto
 import org.kavach.core.Json
 import org.kavach.core.TrustEntry
@@ -33,7 +34,11 @@ data class Pack(
 object PackLoader {
 
     private val PINNED_PACK_SIGNER: ByteArray by lazy {
-        Crypto.publicKeyFromSeed(Crypto.demoSeed(Crypto.PACK_SIGNER_LABEL))
+        if (BuildConfig.DEMO_MODE) {
+            Crypto.publicKeyFromSeed(Crypto.demoSeed(Crypto.PACK_SIGNER_LABEL))
+        } else {
+            Crypto.unhex(BuildConfig.PACK_SIGNER_PUBLIC_KEY_HEX)
+        }
     }
 
     /** [read] returns the bytes of a named pack file, e.g. from assets or a directory. */

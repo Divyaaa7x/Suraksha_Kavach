@@ -13,7 +13,8 @@ Scope: the prototype as built. Each row says what is implemented and what is sti
 | Conflicting claims | Reports never overwrite an approval; conflicts show DISPUTED | Implemented (tested) |
 | GPS spoofing | Fix age and accuracy shown; stale fix refused for a new report | Partial. Spoofing cannot be fully prevented. |
 | Malicious peer (Nearby) | Pairing code must be confirmed by a person; events validated before storing | Implemented, untested on two devices |
-| Private key on device | Demo key is derived from a public label in code | **Open.** Must move to Android Keystore before any real use. |
+| Private key on device | Demo variant uses an intentionally public synthetic key; production event signing fails closed | **Open.** Provision an Android Keystore-compatible signing algorithm, device enrollment, key rotation/revocation, and hub trust distribution before operational use. |
+| Production pack trust | Production release build pins an externally supplied Ed25519 public key; release build is blocked without that key and a release keystore | Partial. Organization must provision and protect the matching pack-signing private key. |
 | Hub API abuse | Local-only demo, no authentication | **Open.** Add auth and TLS before any LAN outside a lab. |
 | Stolen device | None | **Open.** Needs revocation list and device lock policy. |
 | Cleartext LAN traffic | Only private addresses allowed by the network security config | Implemented |

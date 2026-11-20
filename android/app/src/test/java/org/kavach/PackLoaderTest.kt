@@ -3,6 +3,7 @@ package org.kavach
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.kavach.pack.PackException
 import org.kavach.pack.PackLoader
@@ -16,6 +17,7 @@ class PackLoaderTest {
 
     @Test
     fun realPackVerifiesAndIsOsmSourced() {
+        assumeTrue("the bundled fixture is signed with the demo key", BuildConfig.DEMO_MODE)
         val pack = PackLoader.load({ File(packDir, it).readBytes() })
         assertEquals("OSM", pack.sourceClass)
         assertTrue(pack.graph.crossings.isNotEmpty())
@@ -41,6 +43,7 @@ class PackLoaderTest {
 
     @Test
     fun tamperedGraphIsRejected() {
+        assumeTrue("the bundled fixture is signed with the demo key", BuildConfig.DEMO_MODE)
         val bytes = File(packDir, "graph.json").readBytes()
         val tampered = bytes.copyOf().also { it[it.size / 2] = (it[it.size / 2] + 1).toByte() }
         try {
@@ -53,6 +56,7 @@ class PackLoaderTest {
 
     @Test
     fun downgradeIsRejected() {
+        assumeTrue("the bundled fixture is signed with the demo key", BuildConfig.DEMO_MODE)
         try {
             PackLoader.load({ File(packDir, it).readBytes() }, minCreatedAt = "2099-01-01T00:00:00+00:00")
             fail("downgrade must be rejected")

@@ -3,15 +3,16 @@ package org.kavach.core
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.util.UUID
+import org.kavach.BuildConfig
 
 /**
- * Builds signed wire events on the device. The phone holds a SYNTHETIC DEMO responder key here.
- * A real device must keep its private key in Android Keystore (dossier section 43); that is a TODO.
+ * Builds signed wire events on the device. Only the demo identity is provisioned in this prototype.
  */
 object Signed {
-    const val RESPONDER_KEY_ID = "demo-responder-01"
+    private const val DEMO_RESPONDER_KEY_ID = "demo-responder-01"
 
-    private val responderSeed: ByteArray by lazy { Crypto.demoSeed(Crypto.RESPONDER_LABEL) }
+    private val responderKeyId: String
+        get() = if (BuildConfig.DEMO_MODE) DEMO_RESPONDER_KEY_ID else BuildConfig.RESPONDER_KEY_ID
 
     fun observation(
         assetId: String,
@@ -33,10 +34,13 @@ object Signed {
             "evidence_sha256" to emptyList<String>(),
             "source_class" to sourceClass,
             "pack_version" to packVersion,
-            "origin_key_id" to RESPONDER_KEY_ID,
+            "origin_key_id" to responderKeyId,
             "note" to note,
         )
-        return withSignature(body, RESPONDER_KEY_ID, responderSeed)
+        check(BuildConfig.DEMO_MODE) {
+            "Production responder enrollment and Keystore-compatible signing are not configured"
+        }
+        return withSignature(body, responderKeyId, Crypto.demoSeed(Crypto.RESPONDER_LABEL))
     }
 
     /** Add the signature and key id to a body. The signature covers the canonical body only. */
