@@ -1,5 +1,6 @@
 data/hub.sqlite3*
 release-data/
+.cloudflare/
 data/raw/telangana-routes.sqlite
 data/raw/southern-zone-latest.osm.pbf
 android/app/src/main/assets/maps/telangana-routes.mapdata
