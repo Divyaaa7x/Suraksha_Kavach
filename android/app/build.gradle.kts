@@ -98,6 +98,13 @@ android {
     }
 
     buildTypes {
+        // -PsideBySide installs a debug build next to an existing install without touching its data.
+        if (providers.gradleProperty("sideBySide").isPresent) {
+            getByName("debug") {
+                applicationIdSuffix = ".atlas"
+                ndk { abiFilters += "arm64-v8a" } // the test phone; keeps wireless installs small
+            }
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -139,6 +146,7 @@ dependencies {
 
     implementation(libs.bouncycastle)
     implementation(libs.play.nearby)
+    implementation(libs.maplibre)
 
     testImplementation(libs.junit)
 }

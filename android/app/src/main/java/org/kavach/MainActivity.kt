@@ -7,6 +7,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -24,11 +27,19 @@ class MainActivity : ComponentActivity() {
     private val vm: KavachViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         setContent {
+            val dark = isSystemInDarkTheme()
             MaterialTheme(
-                colorScheme = lightColorScheme(
-                    primary = Color(0xFF1F6255), onPrimary = Color.White,
+                typography = org.kavach.ui.AtlasTypography,
+                colorScheme = if (dark) darkColorScheme(
+                    primary = Color(0xFF0A84FF), onPrimary = Color.White,
+                    background = Color(0xFF101418), surface = Color(0xFF2E4B4D),
+                    surfaceVariant = Color(0xFF3A5A5C), onSurface = Color(0xFFE8ECF1),
+                    onSurfaceVariant = Color(0xFFAAB4C0),
+                ) else lightColorScheme(
+                    primary = Color(0xFF007AFF), onPrimary = Color.White,
                     secondary = Color(0xFF55786E),
                     background = Color(0xFFF5F7F5), surface = Color(0xFFFFFFFF),
                     surfaceVariant = Color(0xFFE9EFEC), onSurface = Color(0xFF17211D),

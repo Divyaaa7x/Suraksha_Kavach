@@ -167,6 +167,13 @@ class KavachViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun clearRoute() {
+        route = null
+        shortest = null
+        highlightedRouteEdges = emptySet()
+        highlightedRouteCoordinates = emptyList()
+    }
+
     fun packInfo(): Pair<String, String> = ready?.pack?.let { it.packVersion to it.createdAt } ?: ("none" to "")
 
     private fun scenarioSet(): Set<String> =

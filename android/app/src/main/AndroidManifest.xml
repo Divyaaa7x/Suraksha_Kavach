@@ -29,6 +29,7 @@
         android:theme="@style/Theme.Kavach">
         <activity
             android:name=".MainActivity"
+            android:windowSoftInputMode="adjustResize"
             android:exported="true"
             android:configChanges="orientation|screenSize">
             <intent-filter>

@@ -74,7 +74,7 @@ private data class OfflineRoad(val id: Long, val highway: String, val name: Stri
     val minZoom: Int, val points: List<Pair<Double, Double>>)
 private data class OfflinePlace(val kind: String, val name: String, val lat: Double, val lon: Double)
 private data class MapBounds(val south: Double, val north: Double, val west: Double, val east: Double, val zoom: Int)
-private data class TelanganaSnapshot(val roads: Map<Pair<Int, Boolean>, Path>, val route: Path,
+private data class TelanganaSnapshot(val roads: Map<Pair<Int, Boolean>, Path>,
     val water: Path, val boundaries: Map<Int, Path>, val places: List<OfflinePlace>)
 
 /** Reads only geometries intersecting the current viewport from the signed offline map database. */
@@ -164,7 +164,14 @@ fun TelanganaOfflineMap(
     mapHeight: androidx.compose.ui.unit.Dp = 500.dp,
     focusLocation: Pair<Double, Double>? = null,
     highlightedRouteCoordinates: List<Pair<Double, Double>> = emptyList(),
+    chromeless: Boolean = false,
+    dark: Boolean = false,
+    resetSignal: Int = 0,
+    bottomInset: androidx.compose.ui.unit.Dp = 0.dp,
+    userLocation: Pair<Double, Double>? = null,
 ) {
+    // Night palette: our own colours, not another map vendor's.
+    fun tone(day: Long, night: Long) = Color(if (dark) night else day)
     val store = remember(database) { TelanganaMapStore(database) }
     DisposableEffect(store) { onDispose { store.close() } }
     val stateRing = remember(state) { state.rings.first() }
@@ -193,13 +200,29 @@ fun TelanganaOfflineMap(
     val routeWays = remember(graph, highlightedEdges) {
         highlightedEdges.mapNotNull { id -> graph.edges[id]?.id?.let(::routeWayId) ?: routeWayId(id) }.toSet()
     }
+    // Draw only the segments the route uses. Highlighting whole OSM ways showed side branches as route.
+    val routeOverlay = remember(graph, highlightedEdges, highlightedRouteCoordinates, lonScale) {
+        Path().apply {
+            fun x(lon: Double) = (lon * lonScale).toFloat()
+            if (highlightedRouteCoordinates.isNotEmpty()) {
+                highlightedRouteCoordinates.forEachIndexed { i, (lat, lon) ->
+                    if (i == 0) moveTo(x(lon), -lat.toFloat()) else lineTo(x(lon), -lat.toFloat())
+                }
+            } else highlightedEdges.forEach { id ->
+                val edge = graph.edges[id] ?: return@forEach
+                val a = graph.nodes[edge.u] ?: return@forEach
+                val b = graph.nodes[edge.v] ?: return@forEach
+                moveTo(x(a.lon), -a.lat.toFloat()); lineTo(x(b.lon), -b.lat.toFloat())
+            }
+        }
+    }
     val measurer = rememberTextMeasurer()
     val scope = rememberCoroutineScope()
     var size by remember { mutableStateOf(IntSize.Zero) }
     var scale by remember { mutableStateOf(0f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
     var reset by remember { mutableIntStateOf(0) }
-    var snapshot by remember { mutableStateOf(TelanganaSnapshot(emptyMap(), Path(), Path(), emptyMap(), emptyList())) }
+    var snapshot by remember { mutableStateOf(TelanganaSnapshot(emptyMap(), Path(), emptyMap(), emptyList())) }
     var bounds by remember { mutableStateOf<MapBounds?>(null) }
     var mapUnavailable by remember { mutableStateOf(false) }
     val density = LocalDensity.current
@@ -212,7 +235,7 @@ fun TelanganaOfflineMap(
     val stateWidth = xValues.max() - xValues.min()
     val stateHeight = yValues.max() - yValues.min()
 
-    LaunchedEffect(size, reset, state) {
+    LaunchedEffect(size, reset, resetSignal, state) {
         if (size.width == 0 || size.height == 0) return@LaunchedEffect
         scale = minOf(size.width / stateWidth.toFloat(), size.height / stateHeight.toFloat()) * .90f
         offset = Offset((size.width / 2f - centerLon * lonScale * scale).toFloat(),
@@ -231,9 +254,9 @@ fun TelanganaOfflineMap(
         val maxY = latLons.maxOf { -it.first }.toFloat()
         val routeWidth = (maxX - minX).coerceAtLeast(.005f)
         val routeHeight = (maxY - minY).coerceAtLeast(.005f)
-        scale = (minOf(size.width / routeWidth, size.height / routeHeight) * .72f).coerceAtMost(18000f)
+        scale = (minOf(size.width / routeWidth, size.height * (if (chromeless) .55f else 1f) / routeHeight) * .72f).coerceAtMost(18000f)
         offset = Offset(size.width / 2f - (minX + maxX) / 2f * scale,
-            size.height / 2f - (minY + maxY) / 2f * scale)
+            size.height * (if (chromeless) .30f else .5f) - (minY + maxY) / 2f * scale)
     }
     LaunchedEffect(focusLocation, size) {
         val target = focusLocation ?: return@LaunchedEffect
@@ -241,7 +264,7 @@ fun TelanganaOfflineMap(
         val fit = minOf(size.width / stateWidth.toFloat(), size.height / stateHeight.toFloat()) * .90f
         scale = maxOf(scale, fit * 8f).coerceAtMost(18000f)
         val x = (target.second * lonScale).toFloat(); val y = -target.first.toFloat()
-        offset = Offset(size.width / 2f - x * scale, size.height / 2f - y * scale)
+        offset = Offset(size.width / 2f - x * scale, size.height * (if (chromeless) .30f else .5f) - y * scale)
     }
     LaunchedEffect(size, scale, offset, routeWays) {
         if (scale <= 0f || size.width == 0 || size.height == 0) return@LaunchedEffect
@@ -258,7 +281,6 @@ fun TelanganaOfflineMap(
         val result = try { withContext(Dispatchers.IO) {
             val (roads, places) = store.query(area, routeWays)
             val paths = LinkedHashMap<Pair<Int, Boolean>, Path>()
-            val routePath = Path()
                 val roadLabels = ArrayList<OfflinePlace>()
             val adminLines = store.queryBoundaries(area).mapValues { (_, lines) ->
                 Path().apply {
@@ -278,12 +300,9 @@ fun TelanganaOfflineMap(
                 road.points.forEachIndexed { i, (lat, lon) ->
                     val x = (lon * lonScale).toFloat(); val y = (-lat).toFloat()
                     if (i == 0) p.moveTo(x, y) else p.lineTo(x, y)
-                    if (road.id in routeWays) {
-                        if (i == 0) routePath.moveTo(x, y) else routePath.lineTo(x, y)
-                    }
                 }
                 val labelZoom = when (klass) { 2 -> 9; 1 -> 11; else -> 14 }
-                if (road.inState && road.name.isNotBlank() && area.zoom >= labelZoom && roadLabels.size < 400) {
+                if (road.inState && road.name.isNotBlank() && area.zoom >= labelZoom + (if (chromeless) 3 else 0) && roadLabels.size < 400) {
                     val point = road.points[road.points.size / 2]
                     roadLabels += OfflinePlace("road", road.name, point.first, point.second)
                 }
@@ -295,7 +314,7 @@ fun TelanganaOfflineMap(
                     if (i == 0) water.moveTo(x, y) else water.lineTo(x, y)
                 }
             }
-                TelanganaSnapshot(paths, routePath, water, adminLines, places + roadLabels)
+                TelanganaSnapshot(paths, water, adminLines, places + roadLabels)
         } } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
@@ -308,7 +327,7 @@ fun TelanganaOfflineMap(
 
     Box(
         Modifier.fillMaxWidth().height(mapHeight).onSizeChanged { size = it }
-            .background(Color(0xFFF1F3ED))
+            .background(tone(0xFFF1F3ED, 0xFF22393F))
             .pointerInput(Unit) {
                 detectTransformGestures { centroid, pan, zoom, _ ->
                     if (currentScale <= 0f) return@detectTransformGestures
@@ -320,11 +339,19 @@ fun TelanganaOfflineMap(
                 }
             }
             .pointerInput(crossings) {
-                detectTapGestures { tap ->
+                detectTapGestures(onDoubleTap = { tap ->
+                    if (currentScale <= 0f) return@detectTapGestures
+                    val from = currentScale; val start = currentOffset
+                    scope.launch {
+                        animate(from, (from * 2f).coerceAtMost(18000f), animationSpec = tween(260)) { v, _ ->
+                            scale = v; offset = tap - (tap - start) * (v / from)
+                        }
+                    }
+                }, onTap = tap@{ tap ->
                     val fitScale = minOf(size.width / stateWidth.toFloat(), size.height / stateHeight.toFloat()) * .90f
                     if (currentScale < fitScale * 4f) {
                         onSelectCrossing(null)
-                        return@detectTapGestures
+                        return@tap
                     }
                     val hit = crossings.minByOrNull { (_, p) ->
                         val at = Offset((p.lon * lonScale).toFloat() * currentScale + currentOffset.x, -p.lat.toFloat() * currentScale + currentOffset.y)
@@ -335,7 +362,7 @@ fun TelanganaOfflineMap(
                         val at = Offset((p.lon * lonScale).toFloat() * currentScale + currentOffset.x, -p.lat.toFloat() * currentScale + currentOffset.y)
                         onSelectCrossing(if ((at - tap).getDistanceSquared() < 44f * density.density * 44f * density.density) hit.first else null)
                     }
-                }
+                })
             },
     ) {
         Canvas(Modifier.matchParentSize()) {
@@ -346,35 +373,35 @@ fun TelanganaOfflineMap(
                     scale(scale, scale, pivot = Offset.Zero)
                 }) {
                     val strokeScale = 1f / scale
-                    drawPath(statePath, Color(0xFFFAFBF8))
-                    drawPath(statePath, Color(0xFFCAD6C8), style = Stroke(1.8f * strokeScale))
+                    drawPath(statePath, tone(0xFFFAFBF8, 0xFF28494A))
+                    drawPath(statePath, tone(0xFFCAD6C8, 0xFF40645F), style = Stroke(1.8f * strokeScale))
                     snapshot.boundaries.forEach { (level, path) ->
                         val width = when (level) { 5 -> 1.7f; 6 -> 1.25f; else -> .8f } * strokeScale
-                        drawPath(path, Color(0xFFADBCB0), style = Stroke(width,
+                        drawPath(path, tone(0xFFADBCB0, 0xFF55736F), style = Stroke(width,
                             pathEffect = PathEffect.dashPathEffect(floatArrayOf(3f * strokeScale, 3f * strokeScale))))
                     }
-                    drawPath(snapshot.water, Color(0xFF9CCBDD), style = Stroke(2.8f * strokeScale, cap = StrokeCap.Round))
+                    drawPath(snapshot.water, tone(0xFF9CCBDD, 0xFF2D4494), style = Stroke(4f * strokeScale, cap = StrokeCap.Round))
                     snapshot.roads.toSortedMap(compareBy<Pair<Int, Boolean>> { if (it.second) 0 else 1 }.thenBy { it.first }).forEach { (key, path) ->
                         val (klass, inState) = key
-                        val color = if (!inState) Color(0xFFD7DCD7) else when (klass) {
-                            2 -> Color(0xFFEACB91)
-                            1 -> Color(0xFFD5D7D0)
-                            else -> Color(0xFFE0E2DC)
+                        val color = if (!inState) tone(0xFFD7DCD7, 0xFF2B4348) else when (klass) {
+                            2 -> tone(0xFFEACB91, 0xFF38465A)
+                            1 -> tone(0xFFD5D7D0, 0xFF314650)
+                            else -> tone(0xFFE0E2DC, 0xFF2D464B)
                         }
-                        val fill = if (!inState) Color(0xFFF7F8F4) else when (klass) {
-                            2 -> Color(0xFFFFE5AE)
-                            1 -> Color(0xFFFFFEFA)
-                            else -> Color(0xFFFEFEFB)
+                        val fill = if (!inState) tone(0xFFF7F8F4, 0xFF39535A) else when (klass) {
+                            2 -> tone(0xFFFFE5AE, 0xFF6A7890)
+                            1 -> tone(0xFFFFFEFA, 0xFF5B6D80)
+                            else -> tone(0xFFFEFEFB, 0xFF49636A)
                         }
                         val outer = when (klass) { 2 -> 8f; 1 -> 5f; else -> 3f } * strokeScale
                         drawPath(path, color, style = Stroke(outer, cap = StrokeCap.Round))
                         drawPath(path, fill, style = Stroke((outer * .62f).coerceAtLeast(.5f * strokeScale), cap = StrokeCap.Round))
                     }
-                    drawPath(snapshot.route, Color.White, style = Stroke(10f * strokeScale, cap = StrokeCap.Round))
-                    drawPath(snapshot.route, Color(0xFF087E68), style = Stroke(6f * strokeScale, cap = StrokeCap.Round))
+                    drawPath(routeOverlay, Color.White, style = Stroke(10f * strokeScale, cap = StrokeCap.Round))
+                    drawPath(routeOverlay, Color(0xFF087E68), style = Stroke(6f * strokeScale, cap = StrokeCap.Round))
                 }
                 val occupied = HashMap<Long, MutableList<Rect>>()
-                val textStyle = TextStyle(fontSize = 10.sp, color = Color(0xFF34443D))
+                val textStyle = TextStyle(fontSize = 10.sp, color = tone(0xFF34443D, 0xFFD5DCE5))
                 var labelsDrawn = 0
                 orderedPlaces.forEach { place ->
                     if (labelsDrawn >= 140) return@forEach
@@ -390,7 +417,7 @@ fun TelanganaOfflineMap(
                     if (screen.x !in 4f..size.width.toFloat() - 80f || screen.y !in 4f..size.height.toFloat() - 10f) return@forEach
                     val isRoad = place.kind == "road"
                     val medical = place.kind == "hospital" || place.kind == "clinic" || place.kind == "doctors"
-                    val labelStyle = if (isRoad) textStyle.copy(fontSize = 9.sp, color = Color(0xFF56645C)) else textStyle
+                    val labelStyle = if (isRoad) textStyle.copy(fontSize = 9.sp, color = tone(0xFF56645C, 0xFFBCD0EA)) else textStyle
                     val label = measurer.measure(place.name, labelStyle)
                     val topLeft = Offset(if (isRoad) screen.x + 2f else screen.x + 5f,
                         screen.y - label.size.height / 2f)
@@ -419,6 +446,20 @@ fun TelanganaOfflineMap(
                         drawCircle(Color.White, 1.2f, screen)
                     }
                 }
+                focusLocation?.takeIf { it != userLocation }?.let { (lat, lon) ->
+                    val tip = Offset((lon * lonScale).toFloat() * scale + offset.x, -lat.toFloat() * scale + offset.y)
+                    val head = tip - Offset(0f, 30.dp.toPx())
+                    drawLine(Color.White, tip, head, 3.dp.toPx())
+                    drawCircle(Color.White, 13.dp.toPx(), head)
+                    drawCircle(Color(0xFFE0453A), 10.dp.toPx(), head)
+                    drawCircle(Color.White, 3.5.dp.toPx(), head)
+                }
+                userLocation?.let { (lat, lon) ->
+                    val at = Offset((lon * lonScale).toFloat() * scale + offset.x, -lat.toFloat() * scale + offset.y)
+                    drawCircle(Color(0x333D8BFF), 26.dp.toPx(), at)
+                    drawCircle(Color.White, 11.dp.toPx(), at)
+                    drawCircle(Color(0xFF3D8BFF), 8.dp.toPx(), at)
+                }
                 searchPoint?.let { crossing ->
                     val point = Offset((crossing.lon * lonScale).toFloat() * scale + offset.x, -crossing.lat.toFloat() * scale + offset.y)
                     drawCircle(Color.White, 10f, point)
@@ -427,15 +468,15 @@ fun TelanganaOfflineMap(
                 }
             }
         }
-        Text("N  ↑", style = TextStyle(fontSize = 11.sp, color = Color(0xFF34443D)),
+        if (!chromeless) Text("N  ↑", style = TextStyle(fontSize = 11.sp, color = Color(0xFF34443D)),
             modifier = Modifier.align(Alignment.TopStart).padding(10.dp)
                 .background(Color(0xEEFFFFFF), RoundedCornerShape(8.dp)).padding(horizontal = 8.dp, vertical = 5.dp)
                 .semantics { contentDescription = "Map orientation: north is up" })
-        MapScaleIndicator(scale, Modifier.align(Alignment.BottomStart).padding(8.dp))
-        Text(if (mapUnavailable) "Offline map data unavailable" else "© OpenStreetMap contributors · ODbL", fontSize = 10.sp,
-            modifier = Modifier.align(Alignment.BottomEnd).padding(6.dp)
-                .background(Color(0xDDFFFFFF)).padding(horizontal = 5.dp, vertical = 2.dp))
-        Column(Modifier.align(Alignment.TopEnd).padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (!chromeless) MapScaleIndicator(scale, Modifier.align(Alignment.BottomStart).padding(8.dp))
+        if (!chromeless) Text(if (mapUnavailable) "Offline map data unavailable" else "© OpenStreetMap contributors · ODbL", fontSize = 8.sp, color = Color(0xFF34443D),
+            modifier = Modifier.align(if (chromeless) Alignment.BottomCenter else Alignment.BottomEnd).padding(bottom = bottomInset).padding(2.dp)
+                .background(Color(0xB3FFFFFF), RoundedCornerShape(6.dp)).padding(horizontal = 5.dp))
+        if (!chromeless) Column(Modifier.align(Alignment.TopEnd).padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             FilledTonalIconButton(onClick = { zoomMap(scope, 1.5f, size, scale, offset) { s, o -> scale = s; offset = o } },
                 modifier = Modifier.semantics { contentDescription = "Zoom in" }) { Text("+") }
             FilledTonalIconButton(onClick = { zoomMap(scope, .67f, size, scale, offset) { s, o -> scale = s; offset = o } },

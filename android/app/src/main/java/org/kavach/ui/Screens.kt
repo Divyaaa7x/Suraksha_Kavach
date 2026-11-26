@@ -68,7 +68,6 @@ import org.kavach.sync.NearbyRelay
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
 
-private val TABS = listOf("Home", "Map", "Report", "Routes", "More")
 
 /** Status colours. Colour is never the only signal: every status also has a text label. */
 fun statusColor(status: String): Color = when (status) {
@@ -95,66 +94,7 @@ fun AppScreen(vm: KavachViewModel, onRequestLocation: () -> Unit, onStartNearby:
             Text(s.message)
             Text("The app will not show routes from an unverified pack.")
         }
-        is PackState.Ready -> ReadyApp(vm, onRequestLocation, onStartNearby)
-    }
-}
-
-@Composable
-private fun ReadyApp(vm: KavachViewModel, onRequestLocation: () -> Unit, onStartNearby: () -> Unit) {
-    var tab by remember { mutableIntStateOf(0) }
-    var moreTab by remember { mutableIntStateOf(0) }
-    LaunchedEffect(Unit) { vm.refresh() }
-    Column(Modifier.fillMaxSize()) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column {
-                Text("KAVACH", fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp,
-                    color = MaterialTheme.colorScheme.primary)
-                Text("Field support", style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Text("●  OFFLINE", style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(50))
-                    .padding(horizontal = 12.dp, vertical = 7.dp))
-        }
-        HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
-        AnimatedContent(
-            targetState = tab,
-            modifier = Modifier.weight(1f),
-            transitionSpec = { fadeIn(tween(170)) togetherWith fadeOut(tween(100)) },
-            label = "primary navigation",
-        ) { destination ->
-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
-                when (destination) {
-                    0 -> HomeScreen(vm, onGo = { tab = it })
-                    1 -> MapScreen(vm)
-                    2 -> ReportScreen(vm, onRequestLocation)
-                    3 -> RoutesScreen(vm) {
-                        vm.selectedMapArea = "IN-TG"
-                        vm.showLocalDetail = true
-                        tab = 1
-                    }
-                    else -> MoreScreen(vm, moreTab, onSelect = { moreTab = it }, onStartNearby = onStartNearby)
-                }
-            }
-        }
-        NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
-            val icons = listOf(Icons.Filled.Home, Icons.Filled.Place, Icons.Filled.AddCircle,
-                Icons.AutoMirrored.Filled.ArrowForward, Icons.Filled.MoreVert)
-            TABS.forEachIndexed { i, title ->
-                NavigationBarItem(
-                    selected = tab == i,
-                    onClick = { tab = i },
-                    icon = { Icon(icons[i], contentDescription = null) },
-                    label = { Text(title) },
-                    alwaysShowLabel = true,
-                )
-            }
-        }
+        is PackState.Ready -> AtlasHome(vm, onRequestLocation, onStartNearby)
     }
 }
 
@@ -172,7 +112,7 @@ private fun Section(title: String, content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun HomeScreen(vm: KavachViewModel, onGo: (Int) -> Unit) {
+internal fun HomeScreen(vm: KavachViewModel, onGo: (Int) -> Unit) {
     val packState by vm.packState.collectAsState()
     val detailReady = (packState as? PackState.Ready)?.offlineMapDatabase != null
     val graph = vm.graph() ?: return
@@ -217,24 +157,6 @@ private fun HomeScreen(vm: KavachViewModel, onGo: (Int) -> Unit) {
         modifier = Modifier.padding(horizontal = 8.dp, vertical = 12.dp))
 }
 
-@Composable
-private fun MoreScreen(vm: KavachViewModel, selected: Int, onSelect: (Int) -> Unit,
-                      onStartNearby: () -> Unit) {
-    val labels = listOf("Analysis", "Sync", "Audit")
-    Section("Tools") {
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(labels.indices.toList()) { i ->
-                FilterChip(selected = selected == i, onClick = { onSelect(i) }, label = { Text(labels[i]) })
-            }
-        }
-    }
-    when (selected) {
-        0 -> AnalysisScreen(vm)
-        1 -> SyncScreen(vm, onStartNearby)
-        else -> AuditScreen(vm)
-    }
-}
-
 private fun ageText(createdAt: String): String = try {
     val secs = OffsetDateTime.now(ZoneOffset.UTC).toEpochSecond() - OffsetDateTime.parse(createdAt).toEpochSecond()
     when {
@@ -247,7 +169,7 @@ private fun ageText(createdAt: String): String = try {
 }
 
 @Composable
-private fun MapScreen(vm: KavachViewModel) {
+internal fun MapScreen(vm: KavachViewModel) {
     val packState by vm.packState.collectAsState()
     val graph = vm.graph() ?: return
     val areas = vm.indiaAreas()
@@ -397,7 +319,7 @@ private fun MapScreen(vm: KavachViewModel) {
 }
 
 @Composable
-private fun ReportScreen(vm: KavachViewModel, onRequestLocation: () -> Unit) {
+internal fun ReportScreen(vm: KavachViewModel, onRequestLocation: () -> Unit) {
     val graph = vm.graph() ?: return
     val crossings = remember(graph) { graph.crossings.keys.sorted() }
     val crossingOptions = remember(graph) {
@@ -439,7 +361,7 @@ private fun ReportScreen(vm: KavachViewModel, onRequestLocation: () -> Unit) {
 }
 
 @Composable
-private fun NodePicker(label: String, nodes: List<Pair<String, String>>, selected: String, onPick: (String) -> Unit) {
+internal fun NodePicker(label: String, nodes: List<Pair<String, String>>, selected: String, onPick: (String) -> Unit) {
     var open by remember { mutableStateOf(false) }
     Text(label, Modifier.padding(top = 6.dp))
     OutlinedButton(onClick = { open = !open }, modifier = Modifier.fillMaxWidth()) {
@@ -455,7 +377,7 @@ private fun NodePicker(label: String, nodes: List<Pair<String, String>>, selecte
 }
 
 @Composable
-private fun RoutesScreen(vm: KavachViewModel, onShowMap: () -> Unit) {
+internal fun RoutesScreen(vm: KavachViewModel, destinationId: String? = null, onShowMap: () -> Unit) {
     val graph = vm.graph() ?: return
     val hasStatewideRoutes = vm.hasOfflineStatewideRoutes()
     var statewideMode by remember(graph) { mutableStateOf(hasStatewideRoutes) }
@@ -479,8 +401,9 @@ private fun RoutesScreen(vm: KavachViewModel, onShowMap: () -> Unit) {
         return
     }
     var origin by remember(graph) { mutableStateOf(places.firstOrNull { it.second.startsWith("Kamareddy") }?.first ?: places.first().first) }
-    var dest by remember(graph) {
-        mutableStateOf(places.firstOrNull { it.second.contains("Hospital") }?.first ?: places.first().first)
+    var dest by remember(graph, destinationId) {
+        mutableStateOf(places.firstOrNull { it.first == destinationId }?.first
+            ?: places.firstOrNull { it.second.contains("Hospital") }?.first ?: places.first().first)
     }
     var vehicle by remember { mutableStateOf("light") }
     var policy by remember { mutableStateOf(Policy.STRICT) }
@@ -596,7 +519,7 @@ private fun RoutePlaceSearch(label: String, query: String, results: List<Offline
 }
 
 @Composable
-private fun AnalysisScreen(vm: KavachViewModel) {
+internal fun AnalysisScreen(vm: KavachViewModel) {
     Section("Settlements with no verified path to a facility (strict)") {
         if (vm.isolated.isEmpty()) Text("None under the current statuses.")
         vm.isolated.take(60).forEach { s ->
@@ -615,7 +538,7 @@ private fun AnalysisScreen(vm: KavachViewModel) {
 }
 
 @Composable
-private fun SyncScreen(vm: KavachViewModel, onStartNearby: () -> Unit) {
+internal fun SyncScreen(vm: KavachViewModel, onStartNearby: () -> Unit) {
     Section("Local hub (Wi-Fi hotspot / router LAN)") {
         OutlinedTextField(
             value = vm.hubUrl, onValueChange = { vm.hubUrl = it },
@@ -663,7 +586,7 @@ private fun NearbyPanel(relay: NearbyRelay) {
 }
 
 @Composable
-private fun AuditScreen(vm: KavachViewModel) {
+internal fun AuditScreen(vm: KavachViewModel) {
     Section("Event log (append-only; newest first)") {
         if (vm.events.isEmpty()) Text("No events yet.")
         vm.events.take(200).forEach { e ->

@@ -10,6 +10,7 @@ bouncycastle = "1.78.1"
 nearby = "19.3.0"
 coreKtx = "1.13.1"
 junit = "4.13.2"
+maplibre = "11.8.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -28,6 +29,8 @@ room-compiler = { group = "androidx.room", name = "room-compiler", version.ref =
 bouncycastle = { group = "org.bouncycastle", name = "bcprov-jdk18on", version.ref = "bouncycastle" }
 play-nearby = { group = "com.google.android.gms", name = "play-services-nearby", version.ref = "nearby" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
+
+maplibre = { group = "org.maplibre.gl", name = "android-sdk", version.ref = "maplibre" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

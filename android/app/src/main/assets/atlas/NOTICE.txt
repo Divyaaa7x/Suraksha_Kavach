@@ -1,0 +1,6 @@
+Map styles adapted from "MapLibre-GL-JS-AppleMaps-Style" by dddevid (github.com/dddevid), stated MIT License in its README.
+Tiles and fonts: OpenFreeMap (openfreemap.org). Map data (c) OpenStreetMap contributors, ODbL.
+Hill shading: AWS Terrain Tiles (registry.opendata.aws/terrain-tiles).
+Not affiliated with or endorsed by Apple.
+Borders: Natural Earth v5.1.2 (public domain), India point of view. Not a Survey of India certified boundary.
+UI font: Inter, (c) The Inter Project Authors, SIL Open Font License 1.1. Weather: Open-Meteo.com, CC BY 4.0.
