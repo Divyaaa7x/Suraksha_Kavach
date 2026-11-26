@@ -25,8 +25,8 @@ android {
         applicationId = "org.kavach"
         minSdk = 26          // Android 8.0; the dossier's 2 GB Go-class target still runs this
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0-prototype"
+        versionCode = 2
+        versionName = "0.2.0-prototype"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
