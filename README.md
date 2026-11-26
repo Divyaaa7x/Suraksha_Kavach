@@ -10,6 +10,20 @@ Download the route-enabled demo APK from the [latest prototype prerelease](https
 
 This is a **demo/debug prototype**, not an operational or emergency-response app. It uses synthetic demo identities; statewide crossing statuses are unverified; route results need human field verification and are not navigation guidance. Long strict searches may time out, memory use exceeded 200 MB in testing, and 2 GB devices have not been validated. See the [release notes](https://github.com/Divyaaa7x/Suraksha_Kavach/releases/tag/v0.1.0-prototype.1) for the APK checksum and complete limitations.
 
+## Kavach Maps interface
+
+The Android app now opens on a full-screen map with floating glass controls and a three-stop bottom sheet. It is newer than the prerelease APK above, so build it from source.
+
+- **Online map:** MapLibre with OpenFreeMap vector tiles (OpenStreetMap data), 3D buildings, relief shading, rotate and tilt. Without a connection the app falls back to the offline Telangana canvas map. An India overview (zoom 0-8) can be downloaded from Regions.
+- **Borders:** drawn from Natural Earth's India point of view. This is **not** a Survey of India certified boundary and must be verified before any official use.
+- **Search:** pilot places offline; India-wide search online. Nearby results are ordered by straight-line distance.
+- **Directions:** Medak/Kamareddy pilot area, with an animated route and camera preview. Times use road-class speeds, not live traffic.
+- **Weather:** current temperature and US AQI from Open-Meteo.
+
+**Outside services when online:** map tiles (OpenFreeMap), terrain (AWS Terrain Tiles), place search (the typed text and an approximate position go to `photon.komoot.io`), and weather (position rounded to about 1 km goes to Open-Meteo). None of these is needed for the offline report, routing and sync functions.
+
+Not yet checked: offline India download, light theme, location dot and Share on a device.
+
 ## Current implementation
 
 - **Android field app:** Compose screens for readiness, a pan/zoom India states overview, a statewide offline Telangana road map with waterways, settlements, facilities and mapped administrative boundaries, reports, route comparison, isolation/inspection analysis, private-LAN hub sync, Nearby Connections, and event audit. The app verifies its signed pack and map before showing data. No ML model is required.
@@ -48,9 +62,9 @@ To create a static Pages preview from this repository, create a Pages project co
 
 ## Android app
 
-Open `android/` in Android Studio with JDK 17 and an installed Android SDK, then build and run the `app` configuration. The APK bundles its map pack and performs no map tile requests. `scripts/build_osm_pack.py` rebuilds the OSM pack and synchronizes its exact signed files into the APK assets.
+Open `android/` in Android Studio with JDK 17 and an installed Android SDK, then build and run the `app` configuration. The APK bundles its map pack for offline use; the online map requests tiles when a connection is available (see Kavach Maps interface). `scripts/build_osm_pack.py` rebuilds the OSM pack and synchronizes its exact signed files into the APK assets.
 
-The Android project currently has 31 demo and 32 production-variant debug unit tests (three demo-only cases are skipped in the production variant) and builds with Gradle 8.11.1, JDK 21, and Android SDK platform 34. CI builds the `demoDebug` variant; it uses synthetic responder and pack keys and is not for operational use. Production is fail-closed: `assembleProductionRelease` refuses to produce a release until hub-compatible device signing and trusted enrollment are implemented and validated. The release also requires a production pack signer, a non-demo responder identity already enrolled in the signed trust pack, and a release keystore. Keep private signing material out of the repository. Production event signing intentionally refuses to run until that identity path exists. The demo APK was installed and exercised on a connected Pixel 8a running Android 17. The Pixel is not a 2 GB device; the dossier's 200 MB target and 2 GB suitability are not established. See [the test report](docs/test-report.md) for measurements and pending field checks.
+The Android project has demo and production-variant debug unit tests and builds with Gradle 8.11.1, JDK 21, and Android SDK platform 34. CI builds the `demoDebug` variant; it uses synthetic responder and pack keys and is not for operational use. Production is fail-closed: `assembleProductionRelease` refuses to produce a release until hub-compatible device signing and trusted enrollment are implemented and validated. The release also requires a production pack signer, a non-demo responder identity already enrolled in the signed trust pack, and a release keystore. Keep private signing material out of the repository. Production event signing intentionally refuses to run until that identity path exists. The demo APK was installed and exercised on a connected Pixel 8a running Android 17. The Pixel is not a 2 GB device; the dossier's 200 MB target and 2 GB suitability are not established. See [the test report](docs/test-report.md) for measurements and pending field checks.
 
 ## Rebuild the checked-in OSM pack
 
