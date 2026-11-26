@@ -6,13 +6,13 @@ Offline-first, human-approved decision support for flood-related road access in 
 
 ## Try the Android prototype
 
-Download the route-enabled demo APK from the [latest prototype prerelease](https://github.com/Divyaaa7x/Suraksha_Kavach/releases/tag/v0.1.0-prototype.1): [direct APK download](https://github.com/Divyaaa7x/Suraksha_Kavach/releases/download/v0.1.0-prototype.1/app-demo-debug.apk) (about 381 MB). It includes the offline India overview and Telangana map plus statewide OSM route data. Install on Android 8.0 (API 26) or newer; allow your browser/file manager to install APKs if prompted. First launch extracts the route database and needs additional free storage.
+Download the demo APK from the [0.2.0 prototype prerelease](https://github.com/Divyaaa7x/Suraksha_Kavach/releases/tag/v0.2.0-prototype.1): [direct APK download](https://github.com/Divyaaa7x/Suraksha_Kavach/releases/download/v0.2.0-prototype.1/suraksha-kavach-0.2.0-demo.apk) (about 127 MB, Android 8.0 / API 26 or newer). It has the map-first interface and pilot-area routing. It does not include the statewide OSM route data; that is in the older [0.1.0 prerelease](https://github.com/Divyaaa7x/Suraksha_Kavach/releases/tag/v0.1.0-prototype.1) (about 381 MB).
 
-This is a **demo/debug prototype**, not an operational or emergency-response app. It uses synthetic demo identities; statewide crossing statuses are unverified; route results need human field verification and are not navigation guidance. Long strict searches may time out, memory use exceeded 200 MB in testing, and 2 GB devices have not been validated. See the [release notes](https://github.com/Divyaaa7x/Suraksha_Kavach/releases/tag/v0.1.0-prototype.1) for the APK checksum and complete limitations.
+This is a **demo/debug prototype**, not an operational or emergency-response app. It uses synthetic demo identities; statewide crossing statuses are unverified; route results need human field verification and are not navigation guidance. Long strict searches may time out, memory use exceeded 200 MB in testing, and 2 GB devices have not been validated. See the [release notes](https://github.com/Divyaaa7x/Suraksha_Kavach/releases/tag/v0.2.0-prototype.1) for the APK checksum and complete limitations.
 
 ## Kavach Maps interface
 
-The Android app now opens on a full-screen map with floating glass controls and a three-stop bottom sheet. It is newer than the prerelease APK above, so build it from source.
+The Android app now opens on a full-screen map with floating glass controls and a three-stop bottom sheet. It is included from the 0.2.0 prerelease.
 
 - **Online map:** MapLibre with OpenFreeMap vector tiles (OpenStreetMap data), 3D buildings, relief shading, rotate and tilt. Without a connection the app falls back to the offline Telangana canvas map. An India overview (zoom 0-8) can be downloaded from Regions.
 - **Borders:** drawn from Natural Earth's India point of view. This is **not** a Survey of India certified boundary and must be verified before any official use.
