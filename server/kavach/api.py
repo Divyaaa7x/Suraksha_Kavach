@@ -20,6 +20,7 @@ from .service import Hub
 from .pack import demo_signing_key
 from .signing import sign_body
 from .offline_map import OfflineMap
+from .operations import OperationsStore, demo_warning_fixture
 
 ROOT = Path(__file__).resolve().parents[2]
 # Default is the REAL OpenStreetMap pack (ODbL). Set KAVACH_PACK_DIR to use another pack.
@@ -127,6 +128,52 @@ class DemoApprovalRequest(BaseModel):
     rationale: str = Field(min_length=1, max_length=512)
 
 
+class OpsMissionRequest(BaseModel):
+    crossing_id: str = Field(min_length=1, max_length=128)
+    squad_id: str = Field(min_length=1, max_length=128)
+    priority: int = Field(ge=1, le=5)
+    warning_id: str | None = Field(default=None, max_length=128)
+    actor_role: str = Field(default="commander", pattern="^(commander|supervisor)$")
+    actor_id: str = Field(min_length=1, max_length=128)
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=128)
+
+
+class OpsCapImportRequest(BaseModel):
+    xml: str = Field(min_length=1, max_length=450_000)
+    source_url: str = Field(min_length=1, max_length=2048)
+    source_class: str = Field(default="SIMULATED", pattern="^(ARCHIVED_OFFICIAL|SIMULATED)$")
+
+
+class OpsTransitionRequest(BaseModel):
+    to_state: str = Field(min_length=1, max_length=32)
+    actor_role: str = Field(min_length=1, max_length=32)
+    actor_id: str = Field(min_length=1, max_length=128)
+    idempotency_key: str = Field(min_length=1, max_length=128)
+
+
+class OpsReceiptRequest(BaseModel):
+    responder_id: str = Field(min_length=1, max_length=128)
+    receipt_type: str = Field(pattern="^(DELIVERED|READ|ACKNOWLEDGED)$")
+    idempotency_key: str = Field(min_length=1, max_length=128)
+
+
+class OpsInspectionRequest(BaseModel):
+    actor_id: str = Field(min_length=1, max_length=128)
+    observed_status: str = Field(pattern="^(OPEN|CLOSED|WATER|BLOCKAGE|RESTRICTED|UNKNOWN)$")
+    observed_at: str = Field(min_length=1, max_length=64)
+    notes: str = Field(min_length=1, max_length=2048)
+    coordinates: dict[str, float] | None = None
+    evidence: list[dict[str, Any]] = Field(default_factory=list, max_length=20)
+    signed_event: dict[str, Any]
+
+
+class OpsVerifyRequest(BaseModel):
+    decision: str = Field(pattern="^(VERIFIED|REJECTED)$")
+    actor_role: str = Field(min_length=1, max_length=32)
+    actor_id: str = Field(min_length=1, max_length=128)
+    rationale: str = Field(min_length=1, max_length=512)
+
+
 def create_app(pack_dir: Path = PACK_DIR, db_path: Path = DB_PATH,
                demo_approvals_enabled: bool | None = None,
                hub_token: str | None = None,
@@ -150,8 +197,12 @@ def create_app(pack_dir: Path = PACK_DIR, db_path: Path = DB_PATH,
         routes_db_path = None
     hub = Hub(db_path, pack_dir, routes_db_path if expected_routes_hash else None,
               expected_routes_hash if routes_db_path and expected_routes_hash else None)
+    operations = OperationsStore(db_path, hub.graph, demo_mode=demo_approvals_enabled)
+    if demo_approvals_enabled:
+        operations.seed_demo()
     app = FastAPI(title="SURAKSHA KAVACH local hub", version="0.2.0-prototype")
     app.state.hub = hub
+    app.state.operations = operations
     map_meta = Path(pack_dir) / "offline_map.json"
     map_asset = ROOT / "android" / "app" / "src" / "main" / "assets" / "maps" / "telangana-map.mapdata"
     map_cache = Path(os.environ.get("KAVACH_MAP_CACHE", Path(tempfile.gettempdir()) / "suraksha-kavach-map"))
@@ -165,6 +216,156 @@ def create_app(pack_dir: Path = PACK_DIR, db_path: Path = DB_PATH,
     def health():
         return {**hub.health(), "demo_approvals_enabled": demo_approvals_enabled,
                 "hub_auth_enabled": bool(hub_token)}
+
+    def ops_call(fn, *args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except PermissionError as exc:
+            raise HTTPException(403, str(exc)) from exc
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @app.get("/v1/ops/warnings")
+    def ops_warnings():
+        return operations.list_warnings()
+
+    @app.get("/v1/ops/warnings/fixture")
+    def ops_warning_fixture():
+        return demo_warning_fixture()
+
+    @app.get("/v1/ops/warnings/{warning_id}/history")
+    def ops_warning_history(warning_id: str):
+        return ops_call(operations.warning_history, warning_id)
+
+    @app.post("/v1/ops/warnings/import")
+    def ops_import_warning(payload: dict):
+        if not operations.demo_mode:
+            raise HTTPException(403, "operations demo mode is disabled; set KAVACH_DEMO_MODE=1")
+        return ops_call(operations.import_warning, payload)
+
+    @app.post("/v1/ops/warnings/import-cap")
+    def ops_import_cap(req: OpsCapImportRequest):
+        if not operations.demo_mode:
+            raise HTTPException(403, "operations demo mode is disabled; set KAVACH_DEMO_MODE=1")
+        return ops_call(operations.import_cap_xml, req.xml, req.source_url, req.source_class)
+
+    @app.get("/v1/ops/exposure")
+    def ops_exposure(warning_id: str = Query(min_length=1, max_length=128),
+                     at: str | None = Query(default=None, max_length=64)):
+        return ops_call(operations.exposure, warning_id, at)
+
+    @app.get("/v1/ops/squads")
+    def ops_squads():
+        return operations.list_squads()
+
+    @app.get("/v1/ops/missions")
+    def ops_missions(responder_id: str | None = Query(default=None, max_length=128)):
+        missions = operations.list_missions()
+        if responder_id is None:
+            return missions
+        responder = operations.db.execute(
+            "SELECT squad_id FROM responders WHERE responder_id=? AND active=1", (responder_id,)
+        ).fetchone()
+        if responder is None:
+            raise HTTPException(403, "unknown or inactive responder identity")
+        return [m for m in missions if m["squad_id"] == responder["squad_id"]]
+
+    @app.post("/v1/ops/missions")
+    def ops_create_mission(req: OpsMissionRequest):
+        return ops_call(operations.create_mission, req.crossing_id, req.squad_id, req.priority,
+                        req.warning_id, req.actor_role, req.actor_id, req.idempotency_key)
+
+    @app.post("/v1/ops/missions/{mission_id}/transition")
+    def ops_transition(mission_id: str, req: OpsTransitionRequest):
+        return ops_call(operations.transition, mission_id, req.to_state, req.actor_role,
+                        req.idempotency_key, req.actor_id)
+
+    @app.post("/v1/ops/missions/{mission_id}/receipts")
+    def ops_receipt(mission_id: str, req: OpsReceiptRequest):
+        if not operations.demo_mode:
+            raise HTTPException(403, "synthetic operations are disabled; set KAVACH_DEMO_MODE=1 for the prototype")
+        mission = ops_call(operations.get_mission, mission_id)
+        if req.receipt_type == "DELIVERED":
+            expected_state = "DELIVERED"
+        elif req.receipt_type == "READ":
+            expected_state = "READ"
+        else:
+            expected_state = "ACKNOWLEDGED"
+        receipt = ops_call(operations.record_delivery, mission_id, req.responder_id,
+                           req.receipt_type, req.idempotency_key, "field_responder", req.responder_id)
+        # Delivery/reading/acknowledgement are explicit responder actions; sync itself creates none.
+        if mission["state"] != expected_state:
+            receipt["mission"] = ops_call(operations.transition, mission_id, expected_state,
+                                           "field_responder", req.idempotency_key,
+                                           req.responder_id)
+        return receipt
+
+    @app.post("/v1/ops/missions/{mission_id}/observations")
+    def ops_submit_inspection(mission_id: str, req: OpsInspectionRequest):
+        mission = ops_call(operations.get_mission, mission_id)
+        if mission["state"] != "IN_PROGRESS":
+            raise HTTPException(409, "mission must be IN_PROGRESS before submitting inspection")
+        if not operations.db.execute(
+            "SELECT 1 FROM responders WHERE responder_id=? AND squad_id=? AND active=1",
+            (req.actor_id, mission["squad_id"]),
+        ).fetchone():
+            raise HTTPException(403, "responder is not an active member of the assigned squad")
+        signed = req.signed_event
+        event_body = {k: v for k, v in signed.items() if k not in ("signature", "key_id", "received_at")}
+        if (event_body.get("kind") != "OBSERVATION" or
+                event_body.get("asset_id") != mission["crossing_id"] or
+                event_body.get("origin_key_id") != req.actor_id or
+                event_body.get("observation_type") != req.observed_status or
+                event_body.get("note") != req.notes):
+            raise HTTPException(422, "signed observation must match the assigned crossing, responder, status and notes")
+        if req.coordinates is not None:
+            position = event_body.get("position") or {}
+            if any(position.get(k) != req.coordinates.get(k) for k in ("lat", "lon", "accuracy_m")
+                   if k in req.coordinates):
+                raise HTTPException(422, "inspection coordinates do not match the signed observation")
+        # The immutable observation envelope is independently verified and stored by the original hub.
+        accepted = hub.submit(signed)
+        if accepted["status"] not in {"accepted", "duplicate"}:
+            raise HTTPException(422, "signed observation rejected: " + accepted.get("reason", "invalid event"))
+        payload = {"observed_status": req.observed_status, "observed_at": req.observed_at,
+                   "notes": req.notes, "coordinates": req.coordinates, "evidence": req.evidence,
+                   "observation_id": event_body["event_id"]}
+        if req.coordinates is None:
+            payload.pop("coordinates")
+        result = ops_call(operations.submit_inspection, mission_id, req.actor_id, payload,
+                          signed_event_id=event_body["event_id"])
+        result["hub_event_status"] = accepted["status"]
+        return result
+
+    @app.get("/v1/ops/observations")
+    def ops_observations():
+        return operations.list_observations()
+
+    @app.post("/v1/ops/observations/{observation_id}/verify")
+    def ops_verify_inspection(observation_id: str, req: OpsVerifyRequest):
+        observation = ops_call(operations.get_observation, observation_id)
+        if req.decision == "VERIFIED" and observation["observed_status"] == "UNKNOWN":
+            raise HTTPException(422, "an UNKNOWN observation cannot change the operational crossing state")
+        result = ops_call(operations.verify_inspection, observation_id, req.decision,
+                          req.actor_role, req.rationale, req.actor_id)
+        if req.decision == "VERIFIED":
+            approved_status = {"OPEN": "VERIFIED_OPEN", "CLOSED": "VERIFIED_CLOSED",
+                               "WATER": "VERIFIED_CLOSED", "BLOCKAGE": "VERIFIED_CLOSED",
+                               "RESTRICTED": "RESTRICTED"}[observation["observed_status"]]
+            event_id = str(uuid.uuid5(uuid.NAMESPACE_URL, "suraksha-kavach:ops-approval:" + observation_id))
+            body = {"event_id": event_id, "kind": "APPROVAL", "asset_id": observation["crossing_id"],
+                    "approved_status": approved_status,
+                    "approved_at": result["decision_at"],
+                    "rationale": req.rationale.strip(), "source_class": "SIMULATED",
+                    "pack_version": hub.pack_version, "origin_key_id": req.actor_id}
+            key = demo_signing_key(req.actor_id)
+            event = {**body, "signature": sign_body(body, key), "key_id": req.actor_id}
+            result["graph_event"] = hub.submit(event)
+            if result["graph_event"]["status"] not in {"accepted", "duplicate"}:
+                raise HTTPException(503, "decision saved; route/audit event needs retry: " + result["graph_event"].get("reason", "rejected"))
+        return result
 
     @app.post("/v1/demo/approvals")
     def demo_approval(req: DemoApprovalRequest):

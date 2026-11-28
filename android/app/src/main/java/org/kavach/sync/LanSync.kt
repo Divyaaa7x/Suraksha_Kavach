@@ -1,9 +1,13 @@
 package org.kavach.sync
 
 import org.kavach.core.Json
+import org.kavach.data.OpsMission
+import org.kavach.data.TaskDao
+import org.kavach.data.TaskOutboxEntity
 import org.kavach.service.KavachNode
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 
 internal fun isPrivateHubUrl(url: URL): Boolean {
     if (url.protocol !in setOf("http", "https") || url.userInfo != null || url.query != null || url.ref != null) return false
@@ -24,7 +28,7 @@ internal fun isPrivateHubUrl(url: URL): Boolean {
  * Sync with the local command hub over the hotspot / router LAN. No internet is involved. The hub
  * URL must be a private address; network_security_config.xml enforces that for cleartext HTTP.
  */
-class LanSync(private val node: KavachNode) {
+class LanSync(private val node: KavachNode, private val taskDao: TaskDao) {
 
     data class Outcome(val pushed: Int, val rejected: Int, val pulled: Int, val message: String)
 
@@ -61,6 +65,51 @@ class LanSync(private val node: KavachNode) {
         }
         return Outcome(pushed, rejected, pulled, "pushed $pushed, pulled $pulled, rejected $rejected")
     }
+
+    data class TaskSyncOutcome(val missions: Int, val uploaded: Int, val pending: Int)
+
+    /** Pull assigned task projections and retry durable responder actions over the same private LAN. */
+    suspend fun syncTasks(baseUrl: String, hubToken: String, responderId: String): TaskSyncOutcome {
+        require(responderId.isNotBlank()) { "responder identity is required" }
+        val base = URL(baseUrl.trimEnd('/'))
+        require(isPrivateHubUrl(base)) { "hub must be an HTTP(S) service on a private LAN IPv4 address" }
+
+        suspend fun pull(): List<OpsMission> {
+            val raw = getJson(URL("$base/v1/ops/missions?responder_id=${pathSegment(responderId)}"), hubToken) as? List<*>
+                ?: error("hub returned an invalid missions response")
+            val missions = raw.map(OpsMission::parse)
+            taskDao.upsertTasks(missions.map { it.entity() })
+            return missions
+        }
+
+        pull()
+        var uploaded = 0
+        for (item in taskDao.pending()) {
+            try {
+                val payload = (Json.parse(item.payloadJson) as? Map<*, *>)
+                    ?.entries?.associate { (k, v) -> (k as String) to v }
+                    ?: error("queued action payload is invalid")
+                val body = payload + ("idempotency_key" to item.idempotencyKey)
+                val path = when {
+                    item.operation.startsWith("receipt:") -> "/v1/ops/missions/${pathSegment(item.missionId)}/receipts"
+                    item.operation.startsWith("transition:") -> "/v1/ops/missions/${pathSegment(item.missionId)}/transition"
+                    item.operation == "observation" -> "/v1/ops/missions/${pathSegment(item.missionId)}/observations"
+                    else -> error("unknown queued task operation ${item.operation}")
+                }
+                val response = postJson(URL("$base$path"), body, hubToken)
+                val status = (response as? Map<*, *>)?.get("status") as? String
+                if (status in setOf("rejected", "invalid", "error")) error("hub rejected task action")
+                taskDao.markSynced(item.idempotencyKey)
+                uploaded++
+            } catch (e: Exception) {
+                taskDao.markError(item.idempotencyKey, e.message ?: e.javaClass.simpleName)
+            }
+        }
+        val missions = pull()
+        return TaskSyncOutcome(missions.size, uploaded, taskDao.pending().size)
+    }
+
+    private fun pathSegment(value: String): String = URLEncoder.encode(value, "UTF-8").replace("+", "%20")
 
     private fun postJson(url: URL, payload: Any?, hubToken: String): Any? {
         val conn = (url.openConnection() as HttpURLConnection).apply {

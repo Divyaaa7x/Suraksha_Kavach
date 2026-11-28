@@ -4,6 +4,8 @@ import android.app.Application
 import android.database.sqlite.SQLiteDatabase
 import android.util.Log
 import androidx.room.Room
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -41,6 +43,17 @@ sealed interface PackState {
  */
 class KavachApp : Application() {
 
+    private val migration1To2 = object : Migration(1, 2) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("CREATE TABLE IF NOT EXISTS assigned_tasks (missionId TEXT NOT NULL, crossingId TEXT NOT NULL, squadId TEXT NOT NULL, priority TEXT NOT NULL, state TEXT NOT NULL, warningId TEXT, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, PRIMARY KEY(missionId))")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_assigned_tasks_squadId ON assigned_tasks(squadId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_assigned_tasks_state ON assigned_tasks(state)")
+            db.execSQL("CREATE TABLE IF NOT EXISTS task_outbox (idempotencyKey TEXT NOT NULL, missionId TEXT NOT NULL, operation TEXT NOT NULL, payloadJson TEXT NOT NULL, queuedAt TEXT NOT NULL, synced INTEGER NOT NULL, lastError TEXT, PRIMARY KEY(idempotencyKey))")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_task_outbox_missionId ON task_outbox(missionId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_task_outbox_synced ON task_outbox(synced)")
+        }
+    }
+
     lateinit var db: KavachDb
         private set
 
@@ -49,12 +62,14 @@ class KavachApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        db = Room.databaseBuilder(this, KavachDb::class.java, "kavach.db").build()
+        db = Room.databaseBuilder(this, KavachDb::class.java, "kavach.db")
+            .addMigrations(migration1To2)
+            .build()
         Thread({
             try {
                 val pack = PackLoader.load({ name -> assets.open("pack/$name").use { it.readBytes() } })
                 val node = KavachNode(pack, db.events())
-                val ready = PackState.Ready(pack, node, LanSync(node), null)
+                val ready = PackState.Ready(pack, node, LanSync(node, db.tasks()), null)
                 _state.value = ready
                 pack.offlineMap?.let { metadata ->
                     var current = ready

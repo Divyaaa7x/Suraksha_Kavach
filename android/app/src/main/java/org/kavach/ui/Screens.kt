@@ -60,6 +60,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Place
 import org.kavach.PackState
+import org.kavach.BuildConfig
 import org.kavach.graph.Policy
 import org.kavach.graph.OfflineRoutePlace
 import org.kavach.graph.RoadGraph
@@ -560,6 +561,105 @@ internal fun SyncScreen(vm: KavachViewModel, onStartNearby: () -> Unit) {
         val relay = vm.nearby
         if (relay != null) NearbyPanel(relay)
     }
+}
+
+@Composable
+internal fun FieldTasksScreen(vm: KavachViewModel, onRequestLocation: () -> Unit) {
+    val demoEnabled = BuildConfig.DEMO_MODE
+    Section("Responder identity") {
+        Text("SYNTHETIC · competition demo", color = MaterialTheme.colorScheme.tertiary,
+            fontWeight = FontWeight.SemiBold)
+        OutlinedTextField(
+            value = vm.responderId, onValueChange = vm::updateResponderId,
+            label = { Text("Responder ID") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+        )
+        Text("Default: demo-responder-01 · squad: SYN-SQUAD-01 when assigned. Configure provisioned responder credentials before operational use.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Button(onClick = { vm.syncFieldTasks() }, modifier = Modifier.padding(top = 8.dp)) {
+            Text("Sync assigned tasks")
+        }
+        Text("Tasks and responses stay on this phone when the hub is offline. Hub sync is not human acknowledgement or supervisor verification.",
+            Modifier.padding(top = 6.dp), style = MaterialTheme.typography.bodySmall)
+    }
+    if (vm.assignedTasks.isEmpty()) {
+        Section("Assigned inspections") {
+            Text("No tasks cached. Connect to the local hub and sync assigned tasks.")
+        }
+    }
+    vm.assignedTasks.forEach { task ->
+        val actions = vm.taskActions.filter { it.missionId == task.missionId }
+        val ackSaved = actions.any { it.operation == "receipt:ACKNOWLEDGED" }
+        val deliveredSaved = actions.any { it.operation == "receipt:DELIVERED" }
+        val submitted = actions.any { it.operation == "observation" } || task.state in setOf("SUBMITTED", "VERIFIED", "REJECTED", "EXPIRED")
+        val sent = task.state in setOf("SENT", "FORWARDED", "DELIVERED", "READ", "ACKNOWLEDGED", "IN_PROGRESS")
+        var observed by remember(task.missionId) { mutableStateOf("UNKNOWN") }
+        var notes by remember(task.missionId) { mutableStateOf("") }
+        Section("${task.crossingId} · ${task.priority}") {
+            Text("Mission ${task.missionId}", style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Squad ${task.squadId} · ${task.state}", fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(top = 3.dp))
+            if (!task.warningId.isNullOrBlank()) Text("Warning ${task.warningId}")
+            Text("Created ${task.createdAt}", style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+            Text("Receipt and acknowledgement", Modifier.padding(top = 10.dp), fontWeight = FontWeight.Medium)
+            Text("Record each action explicitly. Hub sync alone does not mean the responder received or acknowledged the task.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 4.dp)) {
+                listOf("DELIVERED", "READ", "ACKNOWLEDGED").forEach { type ->
+                    val saved = actions.any { it.operation == "receipt:$type" }
+                    val deliveryKnown = deliveredSaved || task.state in setOf("DELIVERED", "READ", "ACKNOWLEDGED", "IN_PROGRESS", "SUBMITTED", "VERIFIED", "REJECTED")
+                    val allowed = when (type) {
+                        "DELIVERED" -> sent && !deliveryKnown
+                        else -> sent && deliveryKnown
+                    }
+                    OutlinedButton(onClick = { vm.recordTaskReceipt(task.missionId, type) }, enabled = demoEnabled && allowed && !saved) {
+                        Text(if (saved) "$type · saved" else type, fontSize = 11.sp)
+                    }
+                }
+            }
+            if (!actions.all { it.synced }) {
+                Text("${actions.count { !it.synced }} response(s) waiting for hub sync",
+                    Modifier.padding(top = 4.dp), style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.tertiary)
+            }
+            if (!submitted) {
+                Button(onClick = { vm.startTask(task.missionId) }, enabled = demoEnabled && ackSaved && sent && !actions.any { it.operation == "transition:IN_PROGRESS" },
+                    modifier = Modifier.padding(top = 8.dp)) { Text("Start inspection") }
+                Text("Acknowledge the assignment before starting.", style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Observed crossing status", Modifier.padding(top = 8.dp), fontWeight = FontWeight.Medium)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedButton(onClick = onRequestLocation) { Text("Add GPS location") }
+                    vm.fix?.let { fix ->
+                        Text(if (fix.ageS <= 120) "±${fix.accuracyM.toInt()} m · ${fix.ageS}s old" else "GPS fix expired",
+                            style = MaterialTheme.typography.labelSmall)
+                    } ?: Text("Location required", style = MaterialTheme.typography.labelSmall)
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    listOf("OPEN", "CLOSED", "UNKNOWN").forEach { option ->
+                        FilterChip(selected = observed == option, onClick = { observed = option },
+                            label = { Text(option, fontSize = 10.sp) })
+                    }
+                }
+                OutlinedTextField(value = notes, onValueChange = { notes = it.take(1000) },
+                    label = { Text("Inspection notes") }, modifier = Modifier.fillMaxWidth(), minLines = 2)
+                val hasFreshFix = vm.fix?.ageS?.let { it <= 120 } == true
+                Button(onClick = { vm.submitTaskInspection(task.missionId, observed, notes) },
+                    enabled = demoEnabled && ackSaved && sent && notes.isNotBlank() && hasFreshFix,
+                    modifier = Modifier.padding(top = 6.dp)) {
+                    Text("Save inspection offline")
+                }
+                if (!hasFreshFix) Text("A fresh GPS fix is required for the signed inspection record.",
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                Text("Inspection saved${if (actions.any { it.operation == "observation" && it.synced }) " · hub recorded" else " · pending sync"}. Awaiting supervisor review.",
+                    Modifier.padding(top = 8.dp), color = MaterialTheme.colorScheme.tertiary)
+            }
+        }
+    }
+    if (vm.message.isNotEmpty()) Text(vm.message, Modifier.padding(vertical = 8.dp), fontSize = 13.sp)
 }
 
 @Composable
