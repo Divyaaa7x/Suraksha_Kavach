@@ -94,6 +94,8 @@ python -m pytest -q
 
 The Python suite checks the graph, signed event/hub flows, tamper and downgrade rejection, OSM pack provenance, and byte-identical Android pack assets. Android unit tests are under `android/app/src/test/` and require the Android Gradle toolchain.
 
+For the latest scoped checks and honest completion boundaries, see [`TEST_EXECUTION_REPORT.md`](TEST_EXECUTION_REPORT.md), [`FEATURE_IMPLEMENTATION_MATRIX.md`](FEATURE_IMPLEMENTATION_MATRIX.md), and [`PROJECT_AUDIT.md`](PROJECT_AUDIT.md). The V5 warning-to-rescue mission workflow and production deployment are not complete; this repository remains a prototype.
+
 ## Safety boundary
 
 Reports remain claims until approved under the trust policy. Conflicts are shown rather than silently resolved. Unknown crossings are conservatively excluded unless an explicit warning policy is selected. Routes are candidates for qualified human review; a model or map tag cannot certify a road, bridge, culvert, or ford as safe.

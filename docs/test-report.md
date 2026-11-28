@@ -2,6 +2,14 @@
 
 Updated 20 November 2026. This report contains observed results only; unrun hardware and platform checks stay pending.
 
+## Direction-aware settlement access correction — 28 November 2026
+
+- Isolation analysis in both the Python hub and Android engine now respects one-way road direction when answering whether a settlement can reach any facility. The implementation traverses reversed eligible edges from facilities; vehicle restrictions, crossing-status policy and blocked crossings remain applied.
+- Regression coverage checks a one-way edge from a facility toward a village (no village-to-facility access), the opposite direction (access exists), and crossing criticality in both orientations.
+- Python suite: **78 passed**; focused graph suite: **15 passed**. Android demo unit suite: **37 passed**; production variant: **35 passed, 3 demo-only skipped**. `assembleDemoDebug` succeeded. Dashboard browser E2E: **3 passed**; both inline dashboard scripts passed `node --check`.
+- Rebuilt and re-signed the checked-in pilot pack metadata and mirrored it to Android assets. The embedded criticality map was recomputed and verified against the directed algorithm (96 crossings); hub and Android pack files are byte-identical.
+- No map layout or styling changed. The UI was not re-captured in this verification pass. This correction does not add official warning ingestion, statewide route data distribution, mission/task assignment, human delivery acknowledgements, production identity provisioning, or 2 GB device acceptance.
+
 ## Statewide route runtime continuation — 20 November 2026
 
 - Added optional signed-data packaging and installation for the statewide route SQLite database. The pack builder verifies that map and route databases came from the same SHA-256-pinned OSM extract; Android verifies both compressed archive and expanded database hashes, then checks route tables and indexes. Route-table validation now probes only the first required rows rather than scanning millions of rows at startup.

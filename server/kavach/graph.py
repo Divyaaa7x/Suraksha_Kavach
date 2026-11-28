@@ -9,9 +9,9 @@ import hashlib
 import heapq
 import json
 import math
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Iterable
 
 # Crossing states (dossier section 36)
 UNKNOWN = "UNKNOWN"
@@ -228,20 +228,6 @@ def shortest_path(graph: RoadGraph, origin: str, dest: str, vehicle: str = "ligh
 
 # ---------------------------------------------------------------- isolation
 
-class _DSU:
-    def __init__(self, items: Iterable[str]):
-        self.p = {i: i for i in items}
-
-    def find(self, x: str) -> str:
-        while self.p[x] != x:
-            self.p[x] = self.p[self.p[x]]
-            x = self.p[x]
-        return x
-
-    def union(self, a: str, b: str) -> None:
-        self.p[self.find(a)] = self.find(b)
-
-
 def _eligible_edges(graph: RoadGraph, statuses: dict[str, str], vehicle: str, policy: str,
                     blocked: frozenset[str] = frozenset()) -> set[str]:
     out = set()
@@ -264,14 +250,25 @@ def isolated_settlements(graph: RoadGraph, statuses: dict[str, str], vehicle: st
     """Settlements with no eligible path to any facility (topology isolation, dossier section 35)."""
     blocked_edges = frozenset(e.edge_id for e in graph.edges.values() if e.crossing_id in blocked_crossings)
     usable = _eligible_edges(graph, statuses, vehicle, policy, blocked_edges)
-    dsu = _DSU(graph.nodes.keys())
+    # Traverse reversed legal edges from facilities: a node is connected only if
+    # it can travel to a facility while respecting one-way road direction.
+    predecessors: dict[str, list[str]] = {node_id: [] for node_id in graph.nodes}
     for eid in usable:
         e = graph.edges[eid]
-        dsu.union(e.u, e.v)
-    facility_roots = {dsu.find(n.node_id) for n in graph.nodes.values() if n.kind == "facility"}
+        predecessors[e.v].append(e.u)
+        if not e.oneway:
+            predecessors[e.u].append(e.v)
+    can_reach_facility = {n.node_id for n in graph.nodes.values() if n.kind == "facility"}
+    queue = deque(can_reach_facility)
+    while queue:
+        node_id = queue.popleft()
+        for previous in predecessors[node_id]:
+            if previous not in can_reach_facility:
+                can_reach_facility.add(previous)
+                queue.append(previous)
     out = []
     for n in sorted(graph.nodes.values(), key=lambda x: x.node_id):
-        if n.kind == "settlement" and dsu.find(n.node_id) not in facility_roots:
+        if n.kind == "settlement" and n.node_id not in can_reach_facility:
             out.append({"settlement_id": n.node_id, "name": n.name, "population_estimate": n.population,
                         "reason": "no eligible route to any facility"})
     return out

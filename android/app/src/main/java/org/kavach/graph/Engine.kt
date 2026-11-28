@@ -154,21 +154,6 @@ object Engine {
             Math.round(found.first * 10) / 10.0)
     }
 
-    private class Dsu(items: Collection<String>) {
-        private val p = items.associateWith { it }.toMutableMap()
-        fun find(x: String): String {
-            var y = x
-            while (p.getValue(y) != y) {
-                p[y] = p.getValue(p.getValue(y))
-                y = p.getValue(y)
-            }
-            return y
-        }
-        fun union(a: String, b: String) {
-            p[find(a)] = find(b)
-        }
-    }
-
     fun isolated(
         graph: RoadGraph,
         statuses: Map<String, String>,
@@ -176,7 +161,7 @@ object Engine {
         policy: String = Policy.STRICT,
         blockedCrossings: Set<String> = emptySet(),
     ): List<Isolated> {
-        val usable = HashSet<String>()
+        val reverse = graph.nodes.keys.associateWith { mutableListOf<String>() }
         for (e in graph.edges.values) {
             if (e.crossingId != null && e.crossingId in blockedCrossings) continue
             if (e.allowedVehicles.isNotEmpty() && vehicle !in e.allowedVehicles) continue
@@ -185,15 +170,22 @@ object Engine {
                     graph.crossings[e.crossingId], policy)
                 if (!d.eligible) continue
             }
-            usable.add(e.id)
+            // Walk the graph backwards from facilities so only settlements with a legal
+            // forward path to a facility are considered connected.
+            reverse.getValue(e.v).add(e.u)
+            if (!e.oneway) reverse.getValue(e.u).add(e.v)
         }
-        val dsu = Dsu(graph.nodes.keys)
-        for (id in usable) {
-            val e = graph.edges.getValue(id)
-            dsu.union(e.u, e.v)
+        val reachesFacility = HashSet<String>()
+        val queue = java.util.ArrayDeque<String>()
+        graph.nodes.values.filter { it.kind == "facility" }.forEach {
+            if (reachesFacility.add(it.id)) queue.addLast(it.id)
         }
-        val facilityRoots = graph.nodes.values.filter { it.kind == "facility" }.map { dsu.find(it.id) }.toSet()
-        return graph.nodes.values.filter { it.kind == "settlement" && dsu.find(it.id) !in facilityRoots }
+        while (queue.isNotEmpty()) {
+            for (previous in reverse.getValue(queue.removeFirst())) {
+                if (reachesFacility.add(previous)) queue.addLast(previous)
+            }
+        }
+        return graph.nodes.values.filter { it.kind == "settlement" && it.id !in reachesFacility }
             .sortedBy { it.id }
             .map { Isolated(it.id, it.name, it.population) }
     }

@@ -71,6 +71,19 @@ def test_isolation_detects_settlements_without_verified_path():
     assert iso == ["A", "C"]  # B reaches the hospital with no crossing
 
 
+def test_oneway_edge_away_from_facility_does_not_count_as_access():
+    graph = G.RoadGraph(
+        nodes={
+            "F": G.Node("F", "facility", 18.0, 78.0),
+            "V": G.Node("V", "settlement", 18.1, 78.1, "Village"),
+        },
+        edges={"E": G.Edge("E", "F", "V", 100.0, oneway=True, crossing_id="C")},
+        crossings={"C": G.Crossing("C", "bridge")},
+    )
+    assert [s["settlement_id"] for s in G.isolated_settlements(graph, {"C": G.VERIFIED_OPEN})] == ["V"]
+    assert G.criticality(graph)["C"] == 0  # it cannot newly isolate a village already disconnected
+
+
 def test_criticality_identifies_single_path_crossing():
     crit = G.criticality(GRAPH)
     assert crit["C4"] == 1  # village C depends only on C4

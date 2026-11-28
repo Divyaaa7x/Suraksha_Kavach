@@ -6,6 +6,8 @@ import org.junit.Test
 import org.kavach.graph.Engine
 import org.kavach.graph.Policy
 import org.kavach.graph.RoadGraph
+import org.kavach.graph.Node
+import org.kavach.graph.Edge
 import org.kavach.graph.Status
 import java.io.File
 import java.time.Duration
@@ -84,6 +86,39 @@ class EngineGoldenTest {
     @Test
     fun isolationFindsSettlementsWithoutVerifiedPath() {
         assertEquals(listOf("A", "C"), Engine.isolated(graph, unknown).map { it.settlementId })
+    }
+
+    @Test
+    fun oneWayRoadAwayFromFacilityDoesNotClaimSettlementAccess() {
+        val directed = RoadGraph(
+            nodes = mapOf(
+                "S" to Node("S", "settlement", 17.0, 78.0, "Village", 100),
+                "F" to Node("F", "facility", 17.1, 78.1, "Clinic", null),
+            ),
+            edges = mapOf("E" to Edge("E", "F", "S", 1000.0, 30.0, "C", true)),
+            crossings = mapOf("C" to org.kavach.graph.Crossing("C", "bridge", emptySet())),
+            sourceClass = "SIMULATED",
+            version = "directional-test",
+        )
+
+        assertEquals(
+            listOf("S"),
+            Engine.isolated(directed, mapOf("C" to Status.VERIFIED_OPEN)).map { it.settlementId },
+        )
+        assertEquals(0, Engine.criticality(directed).getValue("C"))
+
+        val towardFacility = RoadGraph(
+            nodes = directed.nodes,
+            edges = mapOf("E" to Edge("E", "S", "F", 1000.0, 30.0, "C", true)),
+            crossings = directed.crossings,
+            sourceClass = "SIMULATED",
+            version = "directional-test-forward",
+        )
+        assertEquals(
+            emptyList<String>(),
+            Engine.isolated(towardFacility, mapOf("C" to Status.VERIFIED_OPEN)).map { it.settlementId },
+        )
+        assertEquals(1, Engine.criticality(towardFacility).getValue("C"))
     }
 
     @Test
