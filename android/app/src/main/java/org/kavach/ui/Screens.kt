@@ -606,17 +606,24 @@ internal fun FieldTasksScreen(vm: KavachViewModel, onRequestLocation: () -> Unit
             Text("Receipt and acknowledgement", Modifier.padding(top = 10.dp), fontWeight = FontWeight.Medium)
             Text("Record each action explicitly. Hub sync alone does not mean the responder received or acknowledged the task.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 4.dp)) {
-                listOf("DELIVERED", "READ", "ACKNOWLEDGED").forEach { type ->
-                    val saved = actions.any { it.operation == "receipt:$type" }
-                    val deliveryKnown = deliveredSaved || task.state in setOf("DELIVERED", "READ", "ACKNOWLEDGED", "IN_PROGRESS", "SUBMITTED", "VERIFIED", "REJECTED")
-                    val allowed = when (type) {
-                        "DELIVERED" -> sent && !deliveryKnown
-                        else -> sent && deliveryKnown
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 4.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf("DELIVERED", "READ").forEach { type ->
+                        val saved = actions.any { it.operation == "receipt:$type" }
+                        val deliveryKnown = deliveredSaved || task.state in setOf("DELIVERED", "READ", "ACKNOWLEDGED", "IN_PROGRESS", "SUBMITTED", "VERIFIED", "REJECTED")
+                        val allowed = if (type == "DELIVERED") sent && !deliveryKnown else sent && deliveryKnown
+                        OutlinedButton(onClick = { vm.recordTaskReceipt(task.missionId, type) },
+                            enabled = demoEnabled && allowed && !saved, modifier = Modifier.weight(1f)) {
+                            Text(if (saved) "$type · saved" else type, fontSize = 11.sp, maxLines = 1)
+                        }
                     }
-                    OutlinedButton(onClick = { vm.recordTaskReceipt(task.missionId, type) }, enabled = demoEnabled && allowed && !saved) {
-                        Text(if (saved) "$type · saved" else type, fontSize = 11.sp)
-                    }
+                }
+                val type = "ACKNOWLEDGED"
+                val saved = actions.any { it.operation == "receipt:$type" }
+                val deliveryKnown = deliveredSaved || task.state in setOf("DELIVERED", "READ", "ACKNOWLEDGED", "IN_PROGRESS", "SUBMITTED", "VERIFIED", "REJECTED")
+                OutlinedButton(onClick = { vm.recordTaskReceipt(task.missionId, type) },
+                    enabled = demoEnabled && sent && deliveryKnown && !saved, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (saved) "$type · saved" else type, fontSize = 11.sp, maxLines = 1)
                 }
             }
             if (!actions.all { it.synced }) {

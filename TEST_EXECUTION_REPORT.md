@@ -20,6 +20,16 @@ Environment: Windows 11 host, JDK 21, Android SDK 34, Python 3.14.7; Pixel 8a wa
 | Hub vs Android pack | Byte-identical files verified. |
 | `git diff --check` | Passed (Git reports expected line-ending normalization warnings for the edited source files). |
 
+## Pixel 8a smoke test (28 November 2026)
+
+- Installed the rebuilt `demoDebug` APK and launched `org.kavach.MainActivity`; the Atlas India map rendered, and no fatal Android runtime exception was found in the captured log window.
+- Opened Field Tasks and confirmed the synthetic responder warning is visible. With a local demo hub reached through ADB port reverse, the phone pulled an assigned mission for a real OSM pilot crossing.
+- Recorded **DELIVERED**, **READ**, and **ACKNOWLEDGED** from the app. The hub persisted three separate responder receipt events and the mission reached `ACKNOWLEDGED`; a hub sync was not treated as human acknowledgement.
+- Started the inspection, then stopped the local hub and force-stopped/relaunched the app. The assigned mission and saved receipts remained visible in Room, and the queued action remained marked as waiting for hub sync. This verifies a limited offline restart/cache path on this device.
+- The Pixel exposed an acknowledgement-label wrapping issue; the controls were changed to a two-button row plus a full-width acknowledgement button. The rebuilt APK was reinstalled, and the corrected labels rendered without wrapping on the device.
+
+This was a synthetic prototype smoke test, not a real emergency response. No GPS location was read or inspection submitted, no supervisor decision was made from the phone, and no second-device Nearby transfer, prolonged offline interval, 2 GB device, or production build was tested.
+
 ## Not run / not established
 
-The feature-branch APK was not installed or visually exercised in this pass because ADB reported no attached device. No 2 GB device, second-phone Nearby transfer, LAN sync on hardware, offline fresh install, warning-provider live access, production signing or deployment was tested. Dashboard browser E2E exercises existing route/token flows; the warning/mission workflow has API integration coverage but no browser automation yet. Historical test-report data is not a substitute for those checks.
+No 2 GB device, second-phone Nearby transfer, offline fresh install, warning-provider live access, production signing or deployment was tested. Dashboard browser E2E exercises existing route/token flows; the warning/mission workflow has API integration coverage but no browser automation yet. Historical test-report data is not a substitute for those checks.
