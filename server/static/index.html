@@ -49,7 +49,7 @@
   .dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:4px; vertical-align:middle; }
   .route-key { display:inline-block; width:20px; height:5px; margin:0 4px 2px 0; background:#00695c; outline:2px solid #fff; vertical-align:middle; }
   label { display:block; font-size:13px; color:var(--muted); margin-top:8px; }
-  select, input, button { font:inherit; padding:8px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--fg); width:100%; }
+  select, input, textarea, button { font:inherit; padding:8px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--fg); width:100%; }
   button { background:var(--fg); color:var(--bg); cursor:pointer; margin-top:10px; font-weight:600; }
   table { width:100%; border-collapse:collapse; font-size:13px; }
   td, th { text-align:left; padding:6px 4px; border-bottom:1px solid var(--line); vertical-align:top; }
@@ -60,7 +60,16 @@
   .review-row { border-top:1px solid var(--line); padding:10px 0; }
   .review-actions { display:flex; gap:8px; flex-wrap:wrap; }
   .review-actions button { width:auto; margin-top:6px; }
-  button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-visible { outline:3px solid #087e68; outline-offset:2px; }
+  .ops-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr)); gap:12px; }
+  .ops-list { display:grid; gap:8px; margin-top:8px; }
+  .ops-item { border:1px solid var(--line); border-radius:8px; padding:9px; }
+  .ops-item h3 { font-size:14px; margin:0 0 4px; }
+  .ops-item p { margin:4px 0; }
+  .ops-actions { display:flex; gap:8px; flex-wrap:wrap; }
+  .ops-actions button { width:auto; }
+  .inline-fields { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:0 10px; }
+  .ops-state { font-weight:700; letter-spacing:.02em; }
+  button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus-visible { outline:3px solid #087e68; outline-offset:2px; }
   @media (prefers-reduced-motion: reduce) { .map-controls button { transition:none; } }
 </style>
 </head>
@@ -150,6 +159,45 @@
     </div>
   </section>
 </main>
+<section class="card" style="margin:0 12px 12px" aria-labelledby="opsTitle">
+  <h2 id="opsTitle">Warning replay · field missions</h2>
+  <p class="muted">Archived or simulated data only. Warning exposure is geographic screening, not proof of flooding or a bridge closure. Confirm conditions in the field.</p>
+  <div class="ops-grid">
+    <div>
+      <h2>Warning exposure</h2>
+      <label for="warningImport">Import warning record (source, validity, provenance and GeoJSON polygon)</label>
+      <textarea id="warningImport" rows="5" spellcheck="false" placeholder='{"provider":"IMD","source_url":"https://…","source_class":"ARCHIVED_OFFICIAL","original_alert_id":"…","issued_at":"…","valid_from":"…","valid_until":"…","geometry":{"type":"Polygon","coordinates":[…]},"original":{}}'></textarea>
+      <label for="warningReplayAt">Replay time · browser local timezone</label><input id="warningReplayAt" type="datetime-local" value="2024-08-31T08:30">
+      <div class="ops-actions"><button id="importWarning" type="button">Import warning JSON</button><button id="loadDemoWarning" type="button">Load archived IMD replay</button><button id="refreshOps" type="button">Refresh</button></div>
+      <details style="margin-top:8px"><summary>Import CAP 1.2 XML</summary>
+        <label for="capSourceUrl">Original CAP source URL</label><input id="capSourceUrl" type="url" maxlength="2048" placeholder="https://source.example/alert.xml">
+        <label for="capSourceClass">Provenance class</label><select id="capSourceClass"><option value="SIMULATED">SIMULATED · test only</option><option value="ARCHIVED_OFFICIAL">ARCHIVED_OFFICIAL · archived source</option></select>
+        <label for="capXml">CAP XML alert</label><textarea id="capXml" rows="5" maxlength="450000" spellcheck="false" placeholder="Paste one CAP 1.2 &lt;alert&gt; document"></textarea>
+        <button id="importCap" type="button">Import CAP alert</button>
+      </details>
+      <p class="muted">The bundled archive is an IMD 2024 rainfall report with a district boundary as a coarse reference, not a flood footprint. Historical geometry must never be read as present conditions or confirmed flooding.</p>
+      <div id="opsWarningStatus" class="muted" role="status" aria-live="polite">Loading archived warning records…</div>
+      <div id="opsWarnings" class="ops-list"></div>
+      <div id="opsExposure" class="ops-list"></div>
+    </div>
+    <div>
+      <h2>Assign crossing inspection</h2>
+      <label for="missionCrossing">Pilot crossing</label><select id="missionCrossing"><option value="">Loading crossings…</option></select>
+      <label for="missionSquad">Squad</label><select id="missionSquad"><option value="">Loading squads…</option></select>
+      <label for="missionPriority">Inspection priority</label><select id="missionPriority"><option value="5">High</option><option value="3" selected>Normal</option><option value="1">Low</option></select>
+      <label for="missionWarning">Related archived warning</label><select id="missionWarning"><option value="">None</option></select>
+      <label for="opsActor">Prototype identity</label><input id="opsActor" value="demo-commander-01" maxlength="96" autocomplete="off">
+      <button id="createMission" type="button">Create and queue mission</button>
+      <div id="missionCreateStatus" class="muted" role="status" aria-live="polite"></div>
+    </div>
+  </div>
+  <h2 style="margin-top:14px">Mission and inspection queue</h2>
+  <div id="opsMissions" class="ops-list" aria-live="polite">Loading missions…</div>
+  <h2 style="margin-top:14px">Supervisor · submitted inspections</h2>
+  <div class="inline-fields"><label for="opsSupervisor">Prototype supervisor identity<input id="opsSupervisor" value="demo-supervisor-01" maxlength="96" autocomplete="off"></label><label for="opsRationale">Decision rationale<input id="opsRationale" maxlength="512" placeholder="Required for approval or rejection"></label></div>
+  <div id="opsObservations" class="ops-list" aria-live="polite">Loading submitted inspections…</div>
+  <div id="opsActionStatus" class="muted" role="status" aria-live="polite"></div>
+</section>
 <section class="card" style="margin:0 12px 12px">
   <h2>Coordinator · field report review</h2>
   <p class="muted">Reports are claims. Review evidence and policy, then record a separate human decision. The optional approval control uses a public synthetic demo key; it is not authentication and is unsuitable for real operations.</p>
@@ -165,7 +213,7 @@ const ROAD_W = { motorway:3, trunk:3, primary:2.5, secondary:2, tertiary:1.6, un
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-let G = null, F = null, INDIA = null, selectedState = 'IN-TG', ST = {}, view = {x:0, y:0, k:1}, bounds, roadPath = null, featurePaths = {}, offlinePaths = null, crossEdges = [], selected = null, routeEdges = new Set(), routeGeometry = null, statewidePlaceIndex = new Map(), offlineMap = null, mapTimer = null, mapRequest = 0, detailRequest = 0, cameraFrame = 0, selectedCoord = null;
+let G = null, F = null, INDIA = null, selectedState = 'IN-TG', ST = {}, exposureIds = new Set(), exposurePath = null, opsWarnings = [], view = {x:0, y:0, k:1}, bounds, roadPath = null, featurePaths = {}, offlinePaths = null, crossEdges = [], selected = null, routeEdges = new Set(), routeGeometry = null, statewidePlaceIndex = new Map(), offlineMap = null, mapTimer = null, mapRequest = 0, detailRequest = 0, cameraFrame = 0, selectedCoord = null;
 const canvas = $('map'), ctx = canvas.getContext('2d');
 const indiaCanvas = $('india'), indiaCtx = indiaCanvas.getContext('2d');
 
@@ -248,6 +296,16 @@ function geometryPath(items, coordinates) {
   return path;
 }
 
+function warningGeometryPath(geometry) {
+  const path = new Path2D();
+  const polygons = geometry?.type === 'Polygon' ? [geometry.coordinates] : geometry?.type === 'MultiPolygon' ? geometry.coordinates : [];
+  for (const polygon of polygons) for (const ring of polygon) {
+    ring.forEach(([lon,lat], i) => { const [x,y] = toXY(lat,lon); i ? path.lineTo(x,y) : path.moveTo(x,y); });
+    path.closePath();
+  }
+  return path;
+}
+
 function buildOfflinePaths(data) {
   const collect = (items, predicate) => geometryPath(items.filter(predicate), item => item.coords.map(([lon,lat]) => [lat,lon]));
   return {
@@ -309,6 +367,9 @@ function draw() {
     ctx.strokeStyle='#e0a85c';ctx.lineWidth=1.15/view.k;ctx.stroke(offlinePaths?.roads.major);
     for(const p of offlineMap.places){const [x,y]=toXY(p.lat,p.lon),major=['city','town','district'].includes(p.kind);ctx.beginPath();ctx.arc(x,y,(major?2.8:1.5)/view.k,0,Math.PI*2);ctx.fillStyle=major?'#fffdf8':'#64766b';ctx.fill();if(major&&view.k>360){ctx.font=`${11/view.k}px system-ui`;ctx.fillStyle='#33443a';ctx.fillText(p.name,x+5/view.k,y-4/view.k);}}
   }
+  if (exposurePath) {
+    ctx.save();ctx.fillStyle='#e56b18';ctx.globalAlpha=.12;ctx.fill(exposurePath,'evenodd');ctx.globalAlpha=.75;ctx.strokeStyle='#c85200';ctx.lineWidth=1.5/view.k;ctx.setLineDash([5/view.k,3/view.k]);ctx.stroke(exposurePath);ctx.setLineDash([]);ctx.restore();
+  }
   // Water first, under the roads.
   for (const [kind, path] of Object.entries(featurePaths)) {
     ctx.strokeStyle = WATER[kind] || '#4a90c2';
@@ -328,6 +389,10 @@ function draw() {
     ctx.lineWidth = (selected === e.crossing_id ? 7 : 4) / view.k;
     ctx.lineCap = 'round';
     ctx.stroke();
+    if (exposureIds.has(e.crossing_id)) {
+      const x=(a[0]+b[0])/2,y=(a[1]+b[1])/2;
+      ctx.beginPath();ctx.arc(x,y,8/view.k,0,Math.PI*2);ctx.strokeStyle='#e56b18';ctx.lineWidth=2/view.k;ctx.stroke();
+    }
   }
   // Settlements and facilities.
   for (const n of (view.k > 650 ? G.nodes : [])) {
@@ -594,6 +659,160 @@ async function refreshPanels(scenario) {
     || '<tr><td colspan="3">No unverified crossings.</td></tr>';
 }
 
+function opsWarningLabel(w) {
+  if (w.original?.district && w.original?.hazard) return `${w.original.district} · ${w.original.hazard}`;
+  return w.original?.title || w.original?.summary || w.original_alert_id || w.warning_id;
+}
+
+async function refreshOperations() {
+  $('opsWarningStatus').textContent = 'Loading warning records, exposure, squads and missions…';
+  try {
+    const [warnings, squads, missions] = await Promise.all([
+      j('/v1/ops/warnings'), j('/v1/ops/squads'), j('/v1/ops/missions')
+    ]);
+    opsWarnings = warnings;
+    const selectedWarning = $('missionWarning').value;
+    $('missionWarning').innerHTML = '<option value="">None</option>' + warnings.map(w => `<option value="${esc(w.warning_id)}">${esc(opsWarningLabel(w))} · ${esc(w.source_class)}</option>`).join('');
+    if (warnings.some(w => w.warning_id === selectedWarning)) $('missionWarning').value = selectedWarning;
+    $('opsWarnings').innerHTML = warnings.length ? warnings.map(w => `<article class="ops-item"><h3>${esc(opsWarningLabel(w))}</h3><p><span class="badge">${esc(w.source_class)}</span> · ${esc(w.provider)} · ${esc(w.original_alert_id || w.original?.alert_id_note || 'alert ID not published in source')}</p><p class="muted">Issued ${esc(w.issued_at || 'date stated in archived source')} · valid ${esc(w.valid_from || 'not specified')} to ${esc(w.valid_until || 'not specified')} · imported ${esc(w.imported_at)} · ${w.active ? 'not cancelled in archive lineage' : 'cancelled in archive lineage'}<br>Scope: ${esc(w.original?.geometry_note || 'see original geometry and source') }<br>Source: ${esc(w.source_url)}</p><div class="ops-actions"><button type="button" data-exposure="${esc(w.warning_id)}">Check map exposure</button></div></article>`).join('') : '<p class="muted">No warning records imported. Import an attributable archived or explicitly simulated warning record above.</p>';
+    document.querySelectorAll('[data-exposure]').forEach(b => b.addEventListener('click', () => refreshExposure(b.dataset.exposure)));
+    const currentSquad = $('missionSquad').value;
+    $('missionSquad').innerHTML = '<option value="">Choose assigned squad</option>' + squads.map(s => `<option value="${esc(s.squad_id)}">${esc(s.name)} · ${Number(s.responders) || 0} responders</option>`).join('');
+    if (squads.some(s => s.squad_id === currentSquad)) $('missionSquad').value = currentSquad;
+    const crossings = G?.crossings || [];
+    const currentCrossing = $('missionCrossing').value;
+    $('missionCrossing').innerHTML = '<option value="">Choose crossing</option>' + crossings.map(c => `<option value="${esc(c.crossing_id)}">${esc(c.crossing_id)} · ${esc(c.kind)}</option>`).join('');
+    if (crossings.some(c => c.crossing_id === currentCrossing)) $('missionCrossing').value = currentCrossing;
+    $('opsWarningStatus').textContent = `${warnings.length} warning record(s) · ${squads.length} squad(s) · ${missions.length} mission(s). Archived warnings are historical, not live.`;
+    renderMissions(missions);
+    await refreshOperationsObservations();
+  } catch (err) {
+    $('opsWarningStatus').textContent = `Operational workflow unavailable: ${err.message}`;
+    $('opsMissions').textContent = 'Could not load operational records. Check the local hub connection and refresh.';
+  }
+}
+
+async function refreshOperationsObservations() {
+  try {
+    const rows = await j('/v1/ops/observations');
+    $('opsObservations').innerHTML = rows.length ? rows.map(o => `<article class="ops-item"><h3>${esc(o.crossing_id)} · inspection ${esc(o.state)}</h3><p>Mission ${esc(o.mission_id)} · responder ${esc(o.responder_id)} · observed ${esc(o.observed_status)} at ${esc(o.observed_at)}</p><p class="muted">Submitted ${esc(o.submitted_at)} · coordinates ${o.lat == null ? 'not supplied' : `${Number(o.lat).toFixed(5)}, ${Number(o.lon).toFixed(5)}`}<br>${esc(o.notes || '')}${o.rationale ? `<br>Decision: ${esc(o.decision_by)} · ${esc(o.decision_at)} · ${esc(o.rationale)}` : ''}</p>${o.state === 'SUBMITTED' ? `<div class="ops-actions"><button type="button" data-verify="${esc(o.observation_id)}" data-decision="VERIFIED">Approve observation</button><button type="button" data-verify="${esc(o.observation_id)}" data-decision="REJECTED">Reject observation</button></div>` : ''}</article>`).join('') : '<p class="muted">No inspection observations recorded.</p>';
+    document.querySelectorAll('[data-verify]').forEach(b => b.addEventListener('click', () => verifyOperationObservation(b.dataset.verify,b.dataset.decision)));
+  } catch (err) { $('opsObservations').textContent = `Inspection review unavailable: ${err.message}`; }
+}
+
+async function verifyOperationObservation(observationId, decision) {
+  const rationale = $('opsRationale').value.trim();
+  if (!rationale) { $('opsActionStatus').textContent = 'Enter a rationale before making a verification decision.'; return; }
+  $('opsActionStatus').textContent = 'Recording supervisor decision…';
+  try {
+    await j(`/v1/ops/observations/${encodeURIComponent(observationId)}/verify`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({decision,actor_role:'supervisor',actor_id:$('opsSupervisor').value.trim() || 'demo-supervisor-01',rationale})});
+    await refreshStatus($('scenario').value.trim()); draw(); await refreshPanels($('scenario').value.trim()); await refreshOperations();
+    if (typeof $('go').onclick === 'function') await $('go').onclick();
+    $('opsActionStatus').textContent = `${decision} decision recorded. Crossing status, settlement analysis, and the current route request have been refreshed.`;
+  } catch (err) { $('opsActionStatus').textContent = `Decision not recorded: ${err.message}`; }
+}
+
+async function refreshExposure(warningId) {
+  $('opsExposure').textContent = 'Checking warning polygon against pilot crossing geometry…';
+  try {
+    const replay = new Date($('warningReplayAt').value);
+    if (!Number.isFinite(replay.getTime())) throw new Error('Choose a valid historical replay time first.');
+    const at = replay.toISOString();
+    const rows = await j('/v1/ops/exposure?warning_id=' + encodeURIComponent(warningId) + '&at=' + encodeURIComponent(at));
+    exposurePath = warningGeometryPath(opsWarnings.find(w => w.warning_id === warningId)?.geometry);
+    exposureIds = new Set(rows.map(r => r.crossing_id)); draw();
+    $('opsExposure').innerHTML = rows.length ? `<h3>Geographic intersections at ${esc($('warningReplayAt').value)} (${rows.length}) · ranked by structural access dependency</h3>` + rows.map(r => `<article class="ops-item"><b>#${esc(r.rank)} · ${esc(r.crossing_id)}</b> · <span class="badge">${esc(r.state)}</span><p class="muted">${r.source_class === 'ARCHIVED_OFFICIAL' ? 'Crossing is within the archived district reference geometry. The rainfall report is not a flood footprint.' : 'Crossing intersects the explicitly simulated area; this does not describe observed conditions.'} Physical status: ${esc(r.physical_status)}.<br>${esc(r.rank_reason || 'No structural rank reason available.')}</p><button type="button" data-assign-crossing="${esc(r.crossing_id)}" data-warning="${esc(warningId)}">Prepare inspection assignment</button></article>`).join('') : `<p class="muted">No mapped pilot crossing intersects this geometry at replay time ${esc($('warningReplayAt').value)}, or the record is outside its validity window. No closure is inferred.</p>`;
+    document.querySelectorAll('[data-assign-crossing]').forEach(b => b.addEventListener('click', () => { $('missionCrossing').value = b.dataset.assignCrossing; $('missionWarning').value = b.dataset.warning; $('missionSquad').focus(); }));
+  } catch (err) { $('opsExposure').textContent = `Exposure unavailable: ${err.message}`; }
+}
+
+function renderMissions(missions) {
+  if (!missions.length) { $('opsMissions').textContent = 'No missions created.'; return; }
+  $('opsMissions').innerHTML = missions.map(m => {
+    const receipts = (m.receipts || []).map(r => `${esc(r.receipt_type)}${r.receipt_type === 'ACKNOWLEDGED' ? ' · human acknowledgement' : r.receipt_type === 'DELIVERED' ? ' · device delivery receipt' : ''} · ${esc(r.responder_id)} · ${esc(r.received_at)}`).join('<br>') || 'No responder receipt recorded.';
+    const canQueue = m.state === 'CREATED';
+    const canSend = m.state === 'QUEUED';
+    return `<article class="ops-item"><h3>${esc(m.crossing_id)} · <span class="ops-state">${esc(m.state)}</span></h3><p>Mission ${esc(m.mission_id)} · squad ${esc(m.squad_id)} · priority ${esc(m.priority)} · ${m.warning_id ? `warning ${esc(m.warning_id)}` : 'no linked warning'}</p><p class="muted">Created ${esc(m.created_at)}<br>${receipts}</p>${canQueue ? `<button type="button" data-queue="${esc(m.mission_id)}">Queue instruction</button>` : ''}${canSend ? `<button type="button" data-send="${esc(m.mission_id)}">Send instruction to transport</button>` : ''}</article>`;
+  }).join('');
+  document.querySelectorAll('[data-queue]').forEach(b => b.addEventListener('click', () => queueMission(b.dataset.queue)));
+  document.querySelectorAll('[data-send]').forEach(b => b.addEventListener('click', () => transitionMission(b.dataset.send,'SENT')));
+}
+
+async function importWarning() {
+  let payload;
+  try { payload = JSON.parse($('warningImport').value); }
+  catch { $('opsWarningStatus').textContent = 'Warning JSON is invalid. Paste the original record with GeoJSON polygon and provenance.'; return; }
+  $('opsWarningStatus').textContent = 'Importing warning with preserved source and geometry…';
+  try {
+    const w = await j('/v1/ops/warnings/import', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    $('opsWarningStatus').textContent = `Imported ${w.warning_id} as ${w.source_class}; this is not a live warning.`;
+    await refreshOperations();
+  } catch (err) { $('opsWarningStatus').textContent = `Warning was not imported: ${err.message}`; }
+}
+
+async function importCap() {
+  const xml = $('capXml').value.trim(), source_url = $('capSourceUrl').value.trim();
+  if (!xml || !source_url) { $('opsWarningStatus').textContent = 'Paste a CAP alert and its source URL.'; return; }
+  const source_class = $('capSourceClass').value;
+  $('opsWarningStatus').textContent = 'Validating CAP provenance, references, dates and polygons…';
+  try {
+    const w = await j('/v1/ops/warnings/import-cap', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({xml,source_url,source_class})});
+    $('opsWarningStatus').textContent = `Imported CAP ${w.original?.msg_type || 'alert'} ${w.original_alert_id || w.warning_id} as ${w.source_class}. Historical CAP data is not live.`;
+    await refreshOperations();
+  } catch (err) { $('opsWarningStatus').textContent = `CAP alert was not imported: ${err.message}`; }
+}
+
+async function loadDemoWarning() {
+  $('opsWarningStatus').textContent = 'Loading the archived rainfall report and district reference geometry…';
+  try {
+    const fixture = await j('/v1/ops/warnings/fixture');
+    const payload = fixture.payload || fixture;
+    if (!['ARCHIVED_OFFICIAL','SIMULATED'].includes(payload.source_class)) throw new Error('fixture source class is not an accepted archive or simulation; import stopped');
+    const w = await j('/v1/ops/warnings/import', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    $('opsWarningStatus').textContent = w.source_class === 'ARCHIVED_OFFICIAL'
+      ? `Imported archived 2024 rainfall record ${w.warning_id}. Its district geometry is reference only, not a flood footprint.`
+      : `Imported simulated area ${w.warning_id}; it is not an official warning or a report of flooding.`;
+    await refreshOperations(); await refreshExposure(w.warning_id);
+  } catch (err) { $('opsWarningStatus').textContent = `Simulated fixture unavailable: ${err.message}`; }
+}
+
+async function createMission() {
+  const crossing_id = $('missionCrossing').value, squad_id = $('missionSquad').value;
+  if (!crossing_id || !squad_id) { $('missionCreateStatus').textContent = 'Choose a pilot crossing and an active squad.'; return; }
+  const warning_id = $('missionWarning').value || null;
+  const fingerprint = JSON.stringify([crossing_id, squad_id, Number($('missionPriority').value), warning_id]);
+  let savedKey = null;
+  try { savedKey = JSON.parse(sessionStorage.getItem('sk-mission-create') || 'null'); } catch {}
+  const freshKey = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const idempotency_key = savedKey?.fingerprint === fingerprint ? savedKey.key : freshKey;
+  try { sessionStorage.setItem('sk-mission-create', JSON.stringify({fingerprint, key:idempotency_key})); } catch {}
+  $('missionCreateStatus').textContent = 'Creating persistent inspection mission…';
+  try {
+    const m = await j('/v1/ops/missions', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({crossing_id,squad_id,priority:Number($('missionPriority').value),warning_id,actor_role:'commander',actor_id:$('opsActor').value.trim() || 'demo-commander-01',idempotency_key})});
+    try { if (JSON.parse(sessionStorage.getItem('sk-mission-create') || 'null')?.key === idempotency_key) sessionStorage.removeItem('sk-mission-create'); } catch {}
+    $('missionCreateStatus').textContent = `Created ${m.mission_id} in CREATED state. Queue it below; this does not mean a responder received it.`;
+    await refreshOperations();
+  } catch (err) { $('missionCreateStatus').textContent = `Mission was not created: ${err.message}`; }
+}
+
+async function queueMission(missionId) {
+  $('opsActionStatus').textContent = 'Queueing the mission in the hub…';
+  try {
+    await j(`/v1/ops/missions/${encodeURIComponent(missionId)}/transition`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({to_state:'QUEUED',actor_role:'commander',actor_id:$('opsActor').value.trim() || 'demo-commander-01',idempotency_key:`dashboard-queue:${missionId}`})});
+    $('opsActionStatus').textContent = 'Mission queued in the hub. No SENT, DELIVERED, or human acknowledgement is claimed.';
+    await refreshOperations();
+  } catch (err) { $('opsActionStatus').textContent = `Mission was not queued: ${err.message}`; }
+}
+
+async function transitionMission(missionId, toState) {
+  $('opsActionStatus').textContent = 'Recording commander handoff to the transport path…';
+  try {
+    await j(`/v1/ops/missions/${encodeURIComponent(missionId)}/transition`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({to_state:toState,actor_role:'commander',actor_id:$('opsActor').value.trim() || 'demo-commander-01',idempotency_key:`dashboard-${toState.toLowerCase()}:${missionId}`})});
+    $('opsActionStatus').textContent = 'Mission marked SENT to the configured transport path. This does not prove device delivery or human acknowledgement.';
+    await refreshOperations();
+  } catch (err) { $('opsActionStatus').textContent = `Mission was not sent: ${err.message}`; }
+}
+
 async function refreshReview() {
   const [reports, approvals] = await Promise.all([
     j('/v1/events?kind=OBSERVATION'), j('/v1/events?kind=APPROVAL')
@@ -680,14 +899,21 @@ async function init() {
       [kind, geometryPath(F.features.filter(feature => feature.kind === kind), feature => feature.coords)]));
     buildRoadPaths();
     $('legend').innerHTML = Object.keys(COLORS).map(k => `<span><i class="dot" style="background:${COLORS[k]}"></i>${k}</span>`).join('')+
-      '<span><i class="route-key"></i>candidate route</span>';
+      '<span><i class="route-key"></i>candidate route</span><span><i class="dot" style="border:2px solid #e56b18;background:transparent"></i>archived geometry match (not flood confirmation)</span>';
     fit();
-    await refreshStatus(''); draw(); await refreshPanels(''); await refreshReview();
+    await refreshStatus(''); draw(); await refreshPanels(''); await refreshReview(); await refreshOperations();
     window.addEventListener('resize', () => { fit(); draw(); drawIndia(); });
   } catch (err) {
     $('hstat').textContent = 'hub unreachable: ' + err.message;
   }
 }
+
+$('importWarning').addEventListener('click', importWarning);
+$('importCap').addEventListener('click', importCap);
+$('loadDemoWarning').addEventListener('click', loadDemoWarning);
+$('refreshOps').addEventListener('click', refreshOperations);
+$('createMission').addEventListener('click', createMission);
+window.setInterval(() => { if (document.visibilityState === 'visible' && G) refreshOperations(); }, 15000);
 
 $('go').onclick = async () => {
   const scenario = $('scenario').value.trim();

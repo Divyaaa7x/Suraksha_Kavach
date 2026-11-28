@@ -97,7 +97,7 @@ import org.kavach.graph.Status
 
 private enum class Page(val title: String) {
     BROWSE(""), PLACE(""), DIRECTIONS("Directions"), REPORT("Report"), STATUS("Field status"),
-    ANALYSIS("Analysis"), SYNC("Sync"), AUDIT("Audit"), REGIONS("Regions")
+    FIELD_TASKS("Field tasks"), ANALYSIS("Analysis"), SYNC("Sync"), AUDIT("Audit"), REGIONS("Regions")
 }
 
 private data class SearchHit(val key: String, val title: String, val subtitle: String,
@@ -420,6 +420,7 @@ fun AtlasHome(vm: KavachViewModel, onRequestLocation: () -> Unit, onStartNearby:
                     })
                 }
                 Page.ANALYSIS -> Column(pageModifier) { AnalysisScreen(vm) }
+                Page.FIELD_TASKS -> Column(pageModifier) { FieldTasksScreen(vm, onRequestLocation) }
                 Page.SYNC -> Column(pageModifier) { SyncScreen(vm, onStartNearby) }
                 Page.AUDIT -> Column(pageModifier) { AuditScreen(vm) }
                 Page.REGIONS -> Column(pageModifier) {
@@ -544,6 +545,7 @@ private fun ToolRow(page: Page, onClick: () -> Unit) {
         Page.REPORT -> "📣" to 0xFFFF453A
         Page.STATUS -> "🛡️" to 0xFF30D158
         Page.ANALYSIS -> "📊" to 0xFF5E5CE6
+        Page.FIELD_TASKS -> "📋" to 0xFF30A46C
         Page.SYNC -> "🔄" to 0xFF32ADE6
         Page.AUDIT -> "🧾" to 0xFFAC8E68
         else -> "🗺️" to 0xFFFF9F0A

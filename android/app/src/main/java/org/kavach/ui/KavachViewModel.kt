@@ -2,6 +2,7 @@ package org.kavach.ui
 
 import android.app.Application
 import android.content.Context
+import androidx.room.withTransaction
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -13,9 +14,13 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.kavach.KavachApp
+import org.kavach.BuildConfig
 import org.kavach.PackState
 import org.kavach.core.Signed
 import org.kavach.data.EventEntity
+import org.kavach.data.AssignedTaskEntity
+import org.kavach.data.OpsTaskAction
+import org.kavach.data.TaskOutboxEntity
 import org.kavach.graph.InspectionRow
 import org.kavach.graph.Isolated
 import org.kavach.graph.OfflineRoutePlace
@@ -30,6 +35,8 @@ import org.kavach.location.Gps
 import org.kavach.service.KavachNode
 import org.kavach.sync.NearbyRelay
 import java.io.File
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
 
 /** Screen state and actions. Heavy work runs on Dispatchers.IO; screens only read plain state. */
 class KavachViewModel(application: Application) : AndroidViewModel(application) {
@@ -40,6 +47,8 @@ class KavachViewModel(application: Application) : AndroidViewModel(application) 
         val events: List<EventEntity>,
         val isolated: List<Isolated>,
         val inspection: List<InspectionRow>,
+        val tasks: List<AssignedTaskEntity>,
+        val taskActions: List<TaskOutboxEntity>,
     )
 
     private val app = application as KavachApp
@@ -54,6 +63,10 @@ class KavachViewModel(application: Application) : AndroidViewModel(application) 
     var counts by mutableStateOf(0 to 0)
         private set
     var events by mutableStateOf<List<EventEntity>>(emptyList())
+        private set
+    var assignedTasks by mutableStateOf<List<AssignedTaskEntity>>(emptyList())
+        private set
+    var taskActions by mutableStateOf<List<TaskOutboxEntity>>(emptyList())
         private set
     var route by mutableStateOf<RouteResult?>(null)
         private set
@@ -89,6 +102,8 @@ class KavachViewModel(application: Application) : AndroidViewModel(application) 
     var scenario by mutableStateOf("")
     var hubUrl by mutableStateOf("http://192.168.1.1:8000")
     var hubToken by mutableStateOf("")
+    var responderId by mutableStateOf(application.getSharedPreferences("field", Context.MODE_PRIVATE)
+        .getString("responder_id", "demo-responder-01") ?: "demo-responder-01")
     var nearby by mutableStateOf<NearbyRelay?>(null)
         private set
 
@@ -188,6 +203,7 @@ class KavachViewModel(application: Application) : AndroidViewModel(application) 
                     RefreshSnapshot(
                         n.statuses(scen), n.counts(), n.allEvents(),
                         n.isolated("light", Policy.STRICT, scen), n.inspection(scen),
+                        app.db.tasks().tasks(), app.db.tasks().allActions(),
                     )
                 }
                 statuses = snapshot.statuses
@@ -195,6 +211,8 @@ class KavachViewModel(application: Application) : AndroidViewModel(application) 
                 events = snapshot.events.asReversed()
                 isolated = snapshot.isolated
                 inspection = snapshot.inspection
+                assignedTasks = snapshot.tasks
+                taskActions = snapshot.taskActions
             } catch (e: Exception) {
                 message = "Could not refresh local data: ${e.message ?: e.javaClass.simpleName}"
             }
@@ -281,6 +299,97 @@ class KavachViewModel(application: Application) : AndroidViewModel(application) 
             refresh()
         }
     }
+
+    fun updateResponderId(value: String) {
+        responderId = value.trim().take(64)
+        getApplication<Application>().getSharedPreferences("field", Context.MODE_PRIVATE)
+            .edit().putString("responder_id", responderId).apply()
+    }
+
+    fun recordTaskReceipt(taskId: String, type: String) {
+        if (!BuildConfig.DEMO_MODE) { message = "Responder enrollment is not provisioned in this build."; return }
+        enqueueTaskAction(taskId, "receipt:$type") {
+            OpsTaskAction.receipt(taskId, responderId, type, now())
+        }
+    }
+
+    fun startTask(taskId: String) {
+        if (!BuildConfig.DEMO_MODE) { message = "Responder enrollment is not provisioned in this build."; return }
+        enqueueTaskAction(taskId, "transition:IN_PROGRESS") {
+            OpsTaskAction.transition(taskId, "IN_PROGRESS", responderId, now())
+        }
+    }
+
+    fun submitTaskInspection(taskId: String, status: String, notes: String) {
+        if (!BuildConfig.DEMO_MODE) { message = "Signed responder enrollment is not provisioned in this build."; return }
+        val actor = responderId
+        if (actor.isBlank()) { message = "Set a responder ID first."; return }
+        val location = fix?.takeIf { it.ageS <= 120 }
+        if (location == null) { message = "Get a fresh GPS fix before saving the signed inspection."; return }
+        val n = node ?: return
+        viewModelScope.launch {
+            try {
+                val dao = app.db.tasks()
+                val now = now()
+                val crossingId = withContext(Dispatchers.IO) { dao.task(taskId)?.crossingId }
+                    ?: error("mission is no longer in the local task cache")
+                val signed = Signed.observation(crossingId, status, location.lat, location.lon,
+                    location.accuracyM, notes, n.packVersion)
+                val signedEventId = signed["event_id"] as String
+                val result = withContext(Dispatchers.IO) {
+                    app.db.withTransaction {
+                        val accepted = n.submit(signed)
+                        check(accepted.status == "accepted") { accepted.reason ?: "signed event was not accepted" }
+                        val coords = mapOf("lat" to location.lat, "lon" to location.lon, "accuracy_m" to location.accuracyM)
+                        dao.enqueue(OpsTaskAction.observation(taskId, actor, status,
+                            signed["observed_at"] as String, notes, coords, signed, now))
+                        if (!dao.hasAction(taskId, "transition:IN_PROGRESS"))
+                            dao.enqueue(OpsTaskAction.transition(taskId, "IN_PROGRESS", actor, now))
+                        signedEventId
+                    }
+                }
+                message = "Signed inspection $result saved on this phone. It is queued for hub sync and awaits supervisor verification."
+                refresh()
+            } catch (e: Exception) {
+                message = "Could not save inspection: ${e.message ?: e.javaClass.simpleName}"
+            }
+        }
+    }
+
+    private fun enqueueTaskAction(taskId: String, operation: String, create: () -> TaskOutboxEntity) {
+        if (responderId.isBlank()) { message = "Set a responder ID first."; return }
+        viewModelScope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    val dao = app.db.tasks()
+                    if (dao.hasAction(taskId, operation)) 0L else dao.enqueue(create())
+                }
+                message = if (result > 0) "Saved on this phone. Sync will send it to the hub." else "This action is already recorded."
+                refresh()
+            } catch (e: Exception) {
+                message = "Could not save task action: ${e.message ?: e.javaClass.simpleName}"
+            }
+        }
+    }
+
+    fun syncFieldTasks() {
+        val sync = lanSync ?: return
+        val actor = responderId
+        val url = hubUrl
+        val token = hubToken
+        viewModelScope.launch {
+            message = "Syncing assigned tasks and queued responses…"
+            try {
+                val result = withContext(Dispatchers.IO) { sync.syncTasks(url, token, actor) }
+                message = "${result.missions} task(s) refreshed · ${result.uploaded} response(s) recorded by hub · ${result.pending} still queued. Hub receipt does not mean supervisor verification."
+                refresh()
+            } catch (e: Exception) {
+                message = "Tasks remain saved offline. Hub sync failed: ${e.message ?: e.javaClass.simpleName}"
+            }
+        }
+    }
+
+    private fun now() = OffsetDateTime.now(ZoneOffset.UTC).toString()
 
     fun startNearby(context: Context, deviceName: String) {
         val n = node ?: return
